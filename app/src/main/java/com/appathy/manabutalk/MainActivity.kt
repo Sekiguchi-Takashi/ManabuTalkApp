@@ -296,7 +296,12 @@ class MainActivity : Activity() {
                 currentMode = mode
                 selectedTheme = null
                 selectedRange = null
-                showFormScreen()
+                when (mode) {
+                    "教えてもらう" -> showFormScreen()
+                    "問題を解く" -> showRandomQuestionScreen()
+                    "テストする" -> showTestKindScreen()
+                    else -> showFormScreen()
+                }
             }
             root.addView(b)
         }
@@ -418,6 +423,284 @@ class MainActivity : Activity() {
         lp.bottomMargin = dp(4)
         t.layoutParams = lp
         return t
+    }
+
+    // ============================================================
+    // 「問題を解く」-> 過去問からランダムに1問出題
+    // ============================================================
+
+    private fun showRandomQuestionScreen() {
+        val pool = QuestionData.am2ByYear.values.flatten()
+        val q = pool.random()
+        showQuestionScreen(q, onBack = { showModeScreen() }, onNext = { showRandomQuestionScreen() }, nextLabel = "次の問題")
+    }
+
+    /**
+     * 1問を表示する共通画面。
+     * choices があれば4択タップで自動採点、なければ「答えを見る」で正解＋解説を表示。
+     */
+    private fun showQuestionScreen(
+        q: QuestionData.Question,
+        onBack: () -> Unit,
+        onNext: () -> Unit,
+        nextLabel: String
+    ) {
+        val root = rootLayout()
+        root.addView(backButton { onBack() })
+
+        val header = TextView(this)
+        header.text = "${q.year} 午前Ⅱ 問${q.no}"
+        header.setTextColor(colorTextSub)
+        header.textSize = 13f
+        header.setPadding(0, 0, 0, dp(8))
+        root.addView(header)
+
+        val scroll = ScrollView(this)
+        scroll.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        )
+        val content = LinearLayout(this)
+        content.orientation = LinearLayout.VERTICAL
+        scroll.addView(content)
+        root.addView(scroll)
+
+        val question = TextView(this)
+        question.text = q.text
+        question.setTextColor(colorTextMain)
+        question.textSize = 16f
+        question.setBackgroundColor(colorCard)
+        question.setPadding(dp(16), dp(16), dp(16), dp(16))
+        val qLp = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        qLp.bottomMargin = dp(12)
+        question.layoutParams = qLp
+        content.addView(question)
+
+        // 結果・解説表示エリア
+        val resultBox = TextView(this)
+        resultBox.setTextColor(colorTextMain)
+        resultBox.textSize = 15f
+        resultBox.setPadding(dp(16), dp(16), dp(16), dp(16))
+        resultBox.visibility = View.GONE
+        val rLp = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        rLp.topMargin = dp(12)
+        resultBox.layoutParams = rLp
+
+        val labels = listOf("ア", "イ", "ウ", "エ")
+
+        fun revealExplanation() {
+            resultBox.visibility = View.VISIBLE
+            resultBox.text = "正解: ${q.answerText}\n\n【解説】\n${q.explanation}"
+            resultBox.setBackgroundColor(colorAccentDim)
+        }
+
+        if (q.choices != null) {
+            // 4択・自動採点
+            val choiceButtons = mutableListOf<Button>()
+            var answered = false
+            for ((i, c) in q.choices.withIndex()) {
+                val b = Button(this)
+                b.text = "${labels[i]}. $c"
+                b.setTextColor(colorTextMain)
+                b.setBackgroundColor(colorCard)
+                b.setPadding(dp(16), dp(14), dp(16), dp(14))
+                b.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                b.isAllCaps = false
+                val lp = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                lp.topMargin = dp(8)
+                b.layoutParams = lp
+                b.setOnClickListener {
+                    if (answered) return@setOnClickListener
+                    answered = true
+                    for ((j, bb) in choiceButtons.withIndex()) {
+                        when (j) {
+                            q.answerIndex -> bb.setBackgroundColor(Color.parseColor("#1E7D5A"))
+                            i -> if (i != q.answerIndex) bb.setBackgroundColor(Color.parseColor("#8A2C2C"))
+                        }
+                    }
+                    revealExplanation()
+                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+                }
+                choiceButtons.add(b)
+                content.addView(b)
+            }
+            content.addView(resultBox)
+        } else {
+            // 一問一答・自己採点(答えを見る)
+            content.addView(resultBox)
+            val showAnsBtn = primaryButton("答えを見る")
+            showAnsBtn.setOnClickListener {
+                revealExplanation()
+                scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+            }
+            content.addView(showAnsBtn)
+        }
+
+        // 下部: 次の問題
+        val nextBtn = primaryButton(nextLabel)
+        nextBtn.setOnClickListener { onNext() }
+        root.addView(nextBtn)
+
+        setContentView(root)
+    }
+
+    // ============================================================
+    // 「テストする」-> 午前Ⅱ / 午後 の選択
+    // ============================================================
+
+    private fun showTestKindScreen() {
+        val root = rootLayout()
+        root.addView(backButton { showModeScreen() })
+        root.addView(titleText("テスト - どちらを受ける?"))
+
+        val am2 = Button(this)
+        am2.text = "午前Ⅱ (4択・年度別)"
+        am2.setBackgroundColor(colorCard)
+        am2.setTextColor(colorTextMain)
+        am2.setPadding(dp(20), dp(18), dp(20), dp(18))
+        val lp1 = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        lp1.topMargin = dp(10)
+        am2.layoutParams = lp1
+        am2.setOnClickListener { showAm2YearScreen() }
+        root.addView(am2)
+
+        val pm = Button(this)
+        pm.text = "午後 (記述・年度別PDF)"
+        pm.setBackgroundColor(colorCard)
+        pm.setTextColor(colorTextMain)
+        pm.setPadding(dp(20), dp(18), dp(20), dp(18))
+        val lp2 = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        lp2.topMargin = dp(10)
+        pm.layoutParams = lp2
+        pm.setOnClickListener { showPmYearScreen() }
+        root.addView(pm)
+
+        setContentView(root)
+    }
+
+    // ---- 午前Ⅱ: 年度選択 ----
+    private fun showAm2YearScreen() {
+        val root = rootLayout()
+        root.addView(backButton { showTestKindScreen() })
+        root.addView(titleText("午前Ⅱ - 年度を選ぶ"))
+
+        for ((year, list) in QuestionData.am2ByYear) {
+            val b = Button(this)
+            b.text = "$year (${list.size}問)"
+            b.setBackgroundColor(colorCard)
+            b.setTextColor(colorTextMain)
+            b.setPadding(dp(20), dp(18), dp(20), dp(18))
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = dp(10)
+            b.layoutParams = lp
+            b.setOnClickListener { startAm2Test(year, list) }
+            root.addView(b)
+        }
+
+        setContentView(root)
+    }
+
+    // ---- 午前Ⅱ: 年度内を順番に出題 ----
+    private fun startAm2Test(year: String, list: List<QuestionData.Question>) {
+        showAm2TestQuestion(year, list, 0)
+    }
+
+    private fun showAm2TestQuestion(year: String, list: List<QuestionData.Question>, index: Int) {
+        if (index >= list.size) {
+            showAm2TestDone(year)
+            return
+        }
+        val q = list[index]
+        showQuestionScreen(
+            q,
+            onBack = { showAm2YearScreen() },
+            onNext = { showAm2TestQuestion(year, list, index + 1) },
+            nextLabel = if (index + 1 >= list.size) "結果へ" else "次へ (${index + 2}/${list.size})"
+        )
+    }
+
+    private fun showAm2TestDone(year: String) {
+        val root = rootLayout()
+        root.addView(titleText("$year 午前Ⅱ おつかれさま!"))
+        val msg = TextView(this)
+        msg.text = "全問終了しました。もう一度挑戦するか、別の年度を選べます。"
+        msg.setTextColor(colorTextMain)
+        msg.textSize = 15f
+        msg.setBackgroundColor(colorCard)
+        msg.setPadding(dp(16), dp(16), dp(16), dp(16))
+        root.addView(msg)
+
+        val again = primaryButton("年度選択にもどる")
+        again.setOnClickListener { showAm2YearScreen() }
+        root.addView(again)
+
+        val home = primaryButton("さいしょの画面へ")
+        home.setOnClickListener { showGreetingScreen() }
+        root.addView(home)
+
+        setContentView(root)
+    }
+
+    // ---- 午後: 年度選択 -> 公式PDFを開く ----
+    private fun showPmYearScreen() {
+        val root = rootLayout()
+        root.addView(backButton { showTestKindScreen() })
+        root.addView(titleText("午後 - 年度を選ぶ"))
+
+        val note = TextView(this)
+        note.text = "午後は記述式のため、IPA公式の問題PDFを開きます(自己採点)。"
+        note.setTextColor(colorTextSub)
+        note.textSize = 12f
+        note.setPadding(0, 0, 0, dp(8))
+        root.addView(note)
+
+        for (exam in QuestionData.pmExams) {
+            val qBtn = Button(this)
+            qBtn.text = "${exam.label} - 問題PDF"
+            qBtn.setBackgroundColor(colorCard)
+            qBtn.setTextColor(colorTextMain)
+            qBtn.setPadding(dp(20), dp(16), dp(20), dp(16))
+            qBtn.isAllCaps = false
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = dp(10)
+            qBtn.layoutParams = lp
+            qBtn.setOnClickListener { openUrl(exam.questionsPdf) }
+            root.addView(qBtn)
+
+            val aBtn = Button(this)
+            aBtn.text = "${exam.label} - 解答例PDF"
+            aBtn.setBackgroundColor(colorAccentDim)
+            aBtn.setTextColor(colorTextMain)
+            aBtn.setPadding(dp(20), dp(12), dp(20), dp(12))
+            aBtn.isAllCaps = false
+            val lp2 = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp2.topMargin = dp(4)
+            aBtn.layoutParams = lp2
+            aBtn.setOnClickListener { openUrl(exam.answersPdf) }
+            root.addView(aBtn)
+        }
+
+        setContentView(root)
+    }
+
+    private fun openUrl(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        startActivity(intent)
     }
 
     // ============================================================
