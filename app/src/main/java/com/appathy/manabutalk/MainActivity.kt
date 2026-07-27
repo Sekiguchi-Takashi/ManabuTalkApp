@@ -44,7 +44,7 @@ class MainActivity : Activity() {
         "算数" to listOf<String>(),
         "理科" to listOf<String>(),
         "社会" to listOf<String>(),
-        "情報" to listOf("セキュリティ")
+        "情報" to listOf("セキュリティ", "午前Ⅰ(共通)")
     )
     private val modes = listOf("教えてもらう", "問題を解く", "テストする")
     private val ranges = listOf("広い", "中間", "狭い")
@@ -298,8 +298,8 @@ class MainActivity : Activity() {
                 selectedRange = null
                 when (mode) {
                     "教えてもらう" -> showFormScreen()
-                    "問題を解く" -> showRandomQuestionScreen()
-                    "テストする" -> showTestKindScreen()
+                    "問題を解く" -> showSolveThemeScreen()
+                    "テストする" -> showTestThemeScreen()
                     else -> showFormScreen()
                 }
             }
@@ -423,6 +423,102 @@ class MainActivity : Activity() {
         lp.bottomMargin = dp(4)
         t.layoutParams = lp
         return t
+    }
+
+    // ============================================================
+    // テーマ選択(セキュリティ=午前Ⅱ / 午前Ⅰ共通)
+    // ============================================================
+
+    private fun themeButton(label: String, onClick: () -> Unit): Button {
+        val b = Button(this)
+        b.text = label
+        b.setBackgroundColor(colorCard)
+        b.setTextColor(colorTextMain)
+        b.isAllCaps = false
+        b.setPadding(dp(20), dp(18), dp(20), dp(18))
+        val lp = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        lp.topMargin = dp(10)
+        b.layoutParams = lp
+        b.setOnClickListener { onClick() }
+        return b
+    }
+
+    // 「問題を解く」→ テーマ選択
+    private fun showSolveThemeScreen() {
+        val root = rootLayout()
+        root.addView(backButton { showModeScreen() })
+        root.addView(titleText("問題を解く - テーマを選ぶ"))
+        root.addView(themeButton("セキュリティ (午前Ⅱ)") {
+            val pool = QuestionData.am2ByYear.values.flatten()
+            showRandomFromPool(pool) { showSolveThemeScreen() }
+        })
+        root.addView(themeButton("午前Ⅰ(共通)") {
+            val pool = QuestionData.am1ByYear.values.flatten()
+            showRandomFromPool(pool) { showSolveThemeScreen() }
+        })
+        setContentView(root)
+    }
+
+    private fun showRandomFromPool(pool: List<QuestionData.Question>, onBack: () -> Unit) {
+        if (pool.isEmpty()) return
+        val q = pool.random()
+        showQuestionScreen(q, onBack = onBack, onNext = { showRandomFromPool(pool, onBack) }, nextLabel = "次の問題")
+    }
+
+    // 「テストする」→ テーマ選択
+    private fun showTestThemeScreen() {
+        val root = rootLayout()
+        root.addView(backButton { showModeScreen() })
+        root.addView(titleText("テスト - テーマを選ぶ"))
+        root.addView(themeButton("セキュリティ (午前Ⅱ・午後)") { showTestKindScreen() })
+        root.addView(themeButton("午前Ⅰ(共通)") { showAm1YearScreen() })
+        setContentView(root)
+    }
+
+    // ---- 午前Ⅰ: 年度選択 → 順番に出題 ----
+    private fun showAm1YearScreen() {
+        val root = rootLayout()
+        root.addView(backButton { showTestThemeScreen() })
+        root.addView(titleText("午前Ⅰ(共通) - 年度を選ぶ"))
+        for ((year, list) in QuestionData.am1ByYear) {
+            root.addView(themeButton("$year (${list.size}問)") { showAm1TestQuestion(year, list, 0) })
+        }
+        setContentView(root)
+    }
+
+    private fun showAm1TestQuestion(year: String, list: List<QuestionData.Question>, index: Int) {
+        if (index >= list.size) {
+            showAm1TestDone()
+            return
+        }
+        val q = list[index]
+        showQuestionScreen(
+            q,
+            onBack = { showAm1YearScreen() },
+            onNext = { showAm1TestQuestion(year, list, index + 1) },
+            nextLabel = if (index + 1 >= list.size) "結果へ" else "次へ (${index + 2}/${list.size})"
+        )
+    }
+
+    private fun showAm1TestDone() {
+        val root = rootLayout()
+        root.addView(titleText("午前Ⅰ(共通) おつかれさま!"))
+        val msg = TextView(this)
+        msg.text = "全問終了しました。もう一度挑戦するか、別のメニューを選べます。"
+        msg.setTextColor(colorTextMain)
+        msg.textSize = 15f
+        msg.setBackgroundColor(colorCard)
+        msg.setPadding(dp(16), dp(16), dp(16), dp(16))
+        root.addView(msg)
+        val again = primaryButton("年度選択にもどる")
+        again.setOnClickListener { showAm1YearScreen() }
+        root.addView(again)
+        val home = primaryButton("さいしょの画面へ")
+        home.setOnClickListener { showGreetingScreen() }
+        root.addView(home)
+        setContentView(root)
     }
 
     // ============================================================
@@ -555,7 +651,7 @@ class MainActivity : Activity() {
 
     private fun showTestKindScreen() {
         val root = rootLayout()
-        root.addView(backButton { showModeScreen() })
+        root.addView(backButton { showTestThemeScreen() })
         root.addView(titleText("テスト - どちらを受ける?"))
 
         val am2 = Button(this)
