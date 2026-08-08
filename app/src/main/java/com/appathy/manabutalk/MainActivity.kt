@@ -8,6 +8,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -40,6 +42,7 @@ class MainActivity : Activity() {
     private lateinit var content: FrameLayout
     private lateinit var tabBar: LinearLayout
     private var currentTab = 0
+    private val handler = Handler(Looper.getMainLooper())
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -168,6 +171,7 @@ class MainActivity : Activity() {
     }
 
     private fun setContent(v: View) {
+        handler.removeCallbacksAndMessages(null)
         content.removeAllViews()
         content.addView(v, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -238,19 +242,31 @@ class MainActivity : Activity() {
             col.addView(bigButton("復習する", reviewSub(), 0xFF7A5AF8.toInt()) { showReview() })
             col.addView(bigButton("模試に挑戦", "1年度分を通しで採点", 0xFF15A6A0.toInt()) { showMockPick() })
 
-            // おすすめ(弱点セクション)
-            val weak = weakestSection()
-            if (weak != null) {
+            // おすすめ(弱点分野 → なければ弱点セクション)
+            val wcat = weakestCategory()
+            if (wcat != null) {
                 col.addView(spacer(4))
                 val rec = card()
                 rec.addView(tv("AIのおすすめ", 13f, cGold, true))
                 rec.addView(spacer(4))
-                rec.addView(tv(weak.second, 14f, cText))
+                rec.addView(tv("「${wcat.first}」の正答率が${wcat.second}%。ここを集中的に練習しましょう。", 14f, cText))
                 rec.addView(spacer(8))
-                rec.addView(listButton("この分野を練習する") {
-                    startRandomPool(sectionPool(weak.first), weak.first)
-                })
+                rec.addView(listButton("この分野を集中演習する") { startCategoryDrill(wcat.first) })
                 col.addView(rec)
+            } else {
+                val weak = weakestSection()
+                if (weak != null) {
+                    col.addView(spacer(4))
+                    val rec = card()
+                    rec.addView(tv("AIのおすすめ", 13f, cGold, true))
+                    rec.addView(spacer(4))
+                    rec.addView(tv(weak.second, 14f, cText))
+                    rec.addView(spacer(8))
+                    rec.addView(listButton("この分野を練習する") {
+                        startRandomPool(sectionPool(weak.first), weak.first)
+                    })
+                    col.addView(rec)
+                }
             }
         })
     }
@@ -280,6 +296,46 @@ class MainActivity : Activity() {
             "am1" to "午前Ⅰ(共通)の正答率が${r1}%。ここを重点的に。"
         else
             "am2" to "午前Ⅱ(セキュリティ)の正答率が${r2}%。ここを重点的に。"
+    }
+
+    /** 分野別の[試行数,正解数]を全問走査で集計。 */
+    private fun categoryStats(): LinkedHashMap<String, IntArray> {
+        val cats = LinkedHashMap<String, IntArray>()
+        for (c in Category.all) cats[c] = intArrayOf(0, 0)
+        fun acc(section: String, q: QuestionData.Question) {
+            val id = Store.qid(section, q.year, q.no)
+            val a = Store.qAtt(id)
+            if (a > 0) {
+                val arr = cats[Category.categoryOf(q)]!!
+                arr[0] += a; arr[1] += Store.qCor(id)
+            }
+        }
+        for (q in QuestionData.am2ByYear.values.flatten()) acc("am2", q)
+        for (q in QuestionData.am1ByYear.values.flatten()) acc("am1", q)
+        return cats
+    }
+
+    /** 3回以上挑戦した分野のうち最も正答率が低いもの。 */
+    private fun weakestCategory(): Pair<String, Int>? {
+        var best: Pair<String, Int>? = null
+        for ((cat, arr) in categoryStats()) {
+            if (arr[0] >= 3) {
+                val r = arr[1] * 100 / arr[0]
+                if (best == null || r < best!!.second) best = cat to r
+            }
+        }
+        return best
+    }
+
+    private fun startCategoryDrill(cat: String) {
+        val pool = Category.pool(cat)
+        if (pool.isEmpty()) return
+        drillNext(pool, cat)
+    }
+
+    private fun drillNext(pool: List<Pair<String, QuestionData.Question>>, cat: String) {
+        val (section, q) = pool.random()
+        showQuestion(section, q, "分野: $cat", { showAnalysis() }) { drillNext(pool, cat) }
     }
 
     // ============================================================
@@ -428,14 +484,24 @@ class MainActivity : Activity() {
     private fun sectionOf(q: QuestionData.Question): String =
         if (QuestionData.am1ByYear.values.any { l -> l.any { it === q } }) "am1" else "am2"
 
+    private fun fmtMs(ms: Long): String {
+        val s = (ms / 1000).toInt().coerceAtLeast(0)
+        return String.format("%02d:%02d", s / 60, s % 60)
+    }
+
     /**
      * 問題画面。選択肢タップで自動採点・色分け・解説表示、記録して onDone(correct)。
+     * 模試ではtimerStart/timerLimitMsでタイマー、onFlagToggleで見直しフラグを表示。
      */
     private fun showQuestion(
         section: String,
         q: QuestionData.Question,
         progress: String,
         onBack: () -> Unit,
+        timerStart: Long? = null,
+        timerLimitMs: Long? = null,
+        flagged: Boolean = false,
+        onFlagToggle: (() -> Unit)? = null,
         onDone: (Boolean) -> Unit
     ) {
         val choices = q.choices
@@ -445,8 +511,38 @@ class MainActivity : Activity() {
             meta.gravity = Gravity.CENTER_VERTICAL
             meta.addView(pill(q.year, cCard2))
             meta.addView(spacer2(8))
-            meta.addView(tv(progress, 12f, cSub))
+            val prog = tv(progress, 12f, cSub)
+            prog.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            meta.addView(prog)
+            if (timerStart != null && timerLimitMs != null) {
+                val timerView = tv("", 13f, cSub, true)
+                meta.addView(timerView)
+                val tick = object : Runnable {
+                    override fun run() {
+                        val remain = timerLimitMs - (System.currentTimeMillis() - timerStart)
+                        timerView.text = if (remain >= 0) "残り ${fmtMs(remain)}" else "超過 ${fmtMs(-remain)}"
+                        timerView.setTextColor(if (remain >= 0) cSub else cRed)
+                        handler.postDelayed(this, 1000)
+                    }
+                }
+                tick.run()
+            }
             col.addView(meta)
+
+            if (onFlagToggle != null) {
+                col.addView(spacer(8))
+                var isFlagged = flagged
+                val flag = tv(if (isFlagged) "★ 見直しに登録済み" else "☆ 見直しに登録", 13f, if (isFlagged) cGold else cSub, true)
+                flag.background = rounded(cCard2, 10)
+                flag.setPadding(dp(12), dp(8), dp(12), dp(8))
+                flag.setOnClickListener {
+                    onFlagToggle()
+                    isFlagged = !isFlagged
+                    flag.text = if (isFlagged) "★ 見直しに登録済み" else "☆ 見直しに登録"
+                    flag.setTextColor(if (isFlagged) cGold else cSub)
+                }
+                col.addView(flag)
+            }
             col.addView(spacer(12))
 
             val qc = card()
@@ -560,19 +656,98 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // 模試
+    // 模試(時間計測・見直しフラグ)
     // ============================================================
     private fun showMockPick() {
         setContent(screen("模試") { col ->
-            col.addView(tv("1年度分を通しで解き、最後に採点します。", 13f, cSub))
+            col.addView(tv("本番同様に時間を計って通しで解きます。午前Ⅱ=40分・午前Ⅰ=50分。見直したい問題には★を付けられます。", 13f, cSub))
             col.addView(spacer(12))
-            col.addView(sectionHeader("午前Ⅱ (セキュリティ・25問)"))
+            col.addView(sectionHeader("午前Ⅱ (セキュリティ・25問・40分)"))
             for ((year, list) in QuestionData.am2ByYear)
-                col.addView(listButton("$year", "${list.size}問") { startSequential("am2", year, list, 0, ArrayList()) })
+                col.addView(listButton("$year", "${list.size}問") { startMock("am2", year, list, 40 * 60_000L) })
             col.addView(spacer(6))
-            col.addView(sectionHeader("午前Ⅰ (共通・30問)"))
+            col.addView(sectionHeader("午前Ⅰ (共通・30問・50分)"))
             for ((year, list) in QuestionData.am1ByYear)
-                col.addView(listButton("$year", "${list.size}問") { startSequential("am1", year, list, 0, ArrayList()) })
+                col.addView(listButton("$year", "${list.size}問") { startMock("am1", year, list, 50 * 60_000L) })
+        })
+    }
+
+    private fun startMock(section: String, year: String, list: List<QuestionData.Question>, limitMs: Long) {
+        val start = System.currentTimeMillis()
+        val results = ArrayList<Boolean>()
+        val flagged = HashSet<Int>()
+        runMock(section, year, list, 0, results, flagged, start, limitMs)
+    }
+
+    private fun runMock(
+        section: String, year: String, list: List<QuestionData.Question>,
+        idx: Int, results: ArrayList<Boolean>, flagged: HashSet<Int>,
+        start: Long, limitMs: Long
+    ) {
+        if (idx >= list.size) {
+            showMockResult(section, year, list, results, flagged, System.currentTimeMillis() - start)
+            return
+        }
+        val no = list[idx].no
+        showQuestion(
+            section, list[idx], "${idx + 1} / ${list.size}",
+            onBack = { showMockPick() },
+            timerStart = start, timerLimitMs = limitMs,
+            flagged = flagged.contains(no),
+            onFlagToggle = { if (flagged.contains(no)) flagged.remove(no) else flagged.add(no) }
+        ) { correct ->
+            results.add(correct)
+            runMock(section, year, list, idx + 1, results, flagged, start, limitMs)
+        }
+    }
+
+    private fun showMockResult(
+        section: String, year: String, list: List<QuestionData.Question>,
+        results: List<Boolean>, flagged: HashSet<Int>, elapsedMs: Long
+    ) {
+        val correct = results.count { it }
+        val total = results.size
+        val rate = if (total == 0) 0 else correct * 100 / total
+        setContent(screen("模試 結果") { col ->
+            val c = card()
+            c.addView(tv("$year ${sectionLabel(section)}", 14f, cSub))
+            c.addView(spacer(6))
+            c.addView(tv("$correct / $total 問正解", 26f, cText, true))
+            c.addView(spacer(6))
+            c.addView(tv("正答率 $rate%", 17f, if (rate >= 60) cGreen else cGold, true))
+            c.addView(spacer(4))
+            c.addView(tv("解答時間 ${fmtMs(elapsedMs)}", 14f, cSub))
+            col.addView(c)
+
+            // 分野別スコア(この年度内)
+            val byCat = LinkedHashMap<String, IntArray>() // cat -> [att, cor]
+            for (i in list.indices) {
+                val cat = Category.categoryOf(list[i])
+                val arr = byCat.getOrPut(cat) { intArrayOf(0, 0) }
+                arr[0]++
+                if (i < results.size && results[i]) arr[1]++
+            }
+            val sc = card()
+            sc.addView(tv("分野別スコア", 14f, cText, true))
+            sc.addView(spacer(10))
+            for ((cat, arr) in byCat) {
+                val r = if (arr[0] == 0) 0 else arr[1] * 100 / arr[0]
+                sc.addView(rateRow("$cat (${arr[1]}/${arr[0]})", arr[0], r, cAccent))
+            }
+            col.addView(sc)
+
+            if (flagged.isNotEmpty()) {
+                val fc = card()
+                fc.addView(tv("見直し登録した問題", 14f, cGold, true))
+                fc.addView(spacer(6))
+                fc.addView(tv("問 " + flagged.sorted().joinToString(", "), 14f, cText))
+                fc.addView(spacer(8))
+                fc.addView(tv("復習キューにも間違えた問題が入っています。", 12f, cSub))
+                col.addView(fc)
+            }
+
+            col.addView(bigButton("間違えた問題を復習", null, 0xFF7A5AF8.toInt()) { showReview() })
+            col.addView(listButton("模試メニューへ") { showMockPick() })
         })
     }
 
@@ -688,13 +863,13 @@ class MainActivity : Activity() {
             })
             col.addView(c)
 
-            // 午後 自己添削
+            // 午後 自己採点
             val c2 = card()
-            c2.addView(tv("午後(記述)の自己添削", 15f, cText, true))
+            c2.addView(tv("午後(記述)の自己採点", 15f, cText, true))
             c2.addView(spacer(6))
-            c2.addView(tv("問題PDFで解答を書き、模範解答PDFと照合します。要点が言えているかを自分で採点しましょう。", 13f, cSub))
+            c2.addView(tv("公式の問題PDFで解答し、解答例PDFと照合。設問ごとに○△×で自己採点して達成度を出します。", 13f, cSub))
             c2.addView(spacer(10))
-            c2.addView(smallBtn("午後の問題を開く", cCard2) { showPmList() })
+            c2.addView(smallBtn("自己採点シートを開く", cAccent) { showPmScoring() })
             col.addView(c2)
 
             // 端末内AI連携(準備中)
@@ -716,8 +891,103 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // タブ3: 分析
+    // 午後 自己採点シート
     // ============================================================
+    private fun showPmScoring() {
+        setContent(screen("午後 自己採点", back = { showTab(2) }) { col ->
+            col.addView(tv("採点する回を選んでください。", 13f, cSub))
+            col.addView(spacer(12))
+            for (pm in QuestionData.pmExams)
+                col.addView(listButton(pm.label) { showPmSheet(pm, 10) })
+        })
+    }
+
+    private fun showPmSheet(pm: QuestionData.PmExam, rows: Int) {
+        val scores = IntArray(rows) { -1 } // 2=○,1=△,0=×,-1=未
+        setContent(screen(pm.label, back = { showPmScoring() }) { col ->
+            // PDFリンク
+            val linkRow = LinearLayout(this)
+            linkRow.orientation = LinearLayout.HORIZONTAL
+            val b1 = smallBtn("問題PDF", cAccent) { openUrl(pm.questionsPdf) }
+            val b2 = smallBtn("解答例PDF", cCard2) { openUrl(pm.answersPdf) }
+            linkRow.addView(b1); linkRow.addView(spacer2(10)); linkRow.addView(b2)
+            col.addView(linkRow)
+            col.addView(spacer(10))
+            col.addView(tv("設問数を選択:", 12.5f, cSub))
+            col.addView(spacer(6))
+            val nRow = LinearLayout(this)
+            nRow.orientation = LinearLayout.HORIZONTAL
+            for (n in listOf(5, 8, 10, 12, 15)) {
+                val b = smallBtn("$n", if (n == rows) cAccent else cCard2) { showPmSheet(pm, n) }
+                b.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { marginEnd = dp(6) }
+                nRow.addView(b)
+            }
+            col.addView(nRow)
+            col.addView(spacer(14))
+
+            // 集計表示
+            val tally = tv("", 14f, cText, true)
+            fun refreshTally() {
+                var o = 0; var t = 0; var x = 0; var un = 0
+                var got = 0.0; var ans = 0
+                for (s in scores) when (s) {
+                    2 -> { o++; got += 1.0; ans++ }
+                    1 -> { t++; got += 0.5; ans++ }
+                    0 -> { x++; ans++ }
+                    else -> un++
+                }
+                val pct = if (ans == 0) 0 else (got / ans * 100).toInt()
+                tally.text = "○ $o  △ $t  × $x  未 $un   達成度 $pct%"
+                tally.setTextColor(if (ans == 0) cSub else if (pct >= 60) cGreen else cGold)
+            }
+
+            // 設問ごとの○△×
+            for (i in 0 until rows) {
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                row.gravity = Gravity.CENTER_VERTICAL
+                val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                lp.bottomMargin = dp(8)
+                row.layoutParams = lp
+                val label = tv("設問 ${i + 1}", 14f, cText)
+                label.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                row.addView(label)
+
+                val marks = arrayOfNulls<TextView>(3) // ×,△,○ = index0,1,2 に対応(値0,1,2)
+                fun paint() {
+                    for (v in 0..2) {
+                        val sel = scores[i] == v
+                        val selColor = if (v == 2) cGreen else if (v == 1) cGold else cRed
+                        marks[v]!!.background = rounded(if (sel) selColor else cCard2, 8)
+                        marks[v]!!.setTextColor(if (sel) Color.WHITE else cSub)
+                    }
+                }
+                val symbols = listOf("×" to 0, "△" to 1, "○" to 2)
+                for ((sym, v) in symbols) {
+                    val m = tv(sym, 16f, cSub, true)
+                    m.gravity = Gravity.CENTER
+                    m.setPadding(dp(14), dp(6), dp(14), dp(6))
+                    m.setOnClickListener { scores[i] = v; paint(); refreshTally() }
+                    marks[v] = m
+                    row.addView(m)
+                    row.addView(spacer2(6))
+                }
+                paint()
+                col.addView(row)
+            }
+
+            col.addView(spacer(8))
+            val tc = card()
+            tc.background = rounded(cCard2)
+            tc.addView(tally)
+            col.addView(tc)
+            refreshTally()
+
+            col.addView(spacer(6))
+            col.addView(tv("※ ○=要点を満たす / △=部分的 / ×=不十分。配点は回により異なるため、達成度は自己評価の目安です。正解の根拠は必ず公式の解答例PDFで確認してください。", 12f, cSub))
+        })
+    }
     private fun bar(percent: Int, fill: Int): View {
         val wrap = LinearLayout(this)
         wrap.orientation = LinearLayout.HORIZONTAL
@@ -799,6 +1069,42 @@ class MainActivity : Activity() {
             for ((year, _) in QuestionData.am1ByYear)
                 yc.addView(rateRow(year, Store.yearAtt("am1", year), Store.yearRate("am1", year), 0xFF15A6A0.toInt()))
             col.addView(yc)
+
+            // 分野別 正答率(挑戦済みのみ、弱い順)
+            val cstats = categoryStats()
+            val tried = cstats.entries
+                .filter { it.value[0] > 0 }
+                .sortedBy { it.value[1].toDouble() / it.value[0] }
+            if (tried.isNotEmpty()) {
+                val cc = card()
+                cc.addView(tv("分野別 正答率", 14f, cText, true))
+                cc.addView(spacer(4))
+                cc.addView(tv("弱い順。タップで集中演習", 12f, cSub))
+                cc.addView(spacer(10))
+                for (e in tried) {
+                    val att = e.value[0]; val cor = e.value[1]
+                    val r = cor * 100 / att
+                    val row = rateRow("${e.key} ($cor/$att)", att, r,
+                        if (r < 50) cRed else if (r < 70) cGold else cGreen)
+                    row.setOnClickListener { startCategoryDrill(e.key) }
+                    cc.addView(row)
+                }
+                col.addView(cc)
+            }
+
+            // 分野を選んで集中演習(全分野)
+            val dc = card()
+            dc.addView(tv("分野を選んで集中演習", 14f, cText, true))
+            dc.addView(spacer(4))
+            dc.addView(tv("苦手分野をピンポイントで反復", 12f, cSub))
+            dc.addView(spacer(10))
+            val catCounts = Category.counts()
+            for (cat in Category.all) {
+                val n = catCounts[cat] ?: 0
+                if (n == 0) continue
+                dc.addView(listButton(cat, "${n}問") { startCategoryDrill(cat) })
+            }
+            col.addView(dc)
 
             // よく間違える問題
             val weak = Store.weakQuestionIds(8).mapNotNull { resolveId(it) }

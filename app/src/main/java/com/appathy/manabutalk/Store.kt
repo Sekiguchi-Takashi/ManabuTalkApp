@@ -107,6 +107,10 @@ object Store {
         val a = yearAtt(section, year); return if (a == 0) 0 else yearCor(section, year) * 100 / a
     }
 
+    // 問題ID単位の集計(分野別分析で使用)
+    fun qAtt(id: String) = sp.getInt("q_att_$id", 0)
+    fun qCor(id: String) = sp.getInt("q_cor_$id", 0)
+
     fun streak() = sp.getInt("streak", 0)
     fun bestStreak() = sp.getInt("best_streak", 0)
     fun studyDays() = (sp.getStringSet("days_set", HashSet()) ?: HashSet()).size
