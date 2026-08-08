@@ -1,815 +1,900 @@
 package com.appathy.manabutalk
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
-import android.text.InputFilter
-import android.text.Editable
-import android.text.TextWatcher
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.*
-import java.net.URLEncoder
+import android.widget.Button
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import java.util.Calendar
 
 /**
- * ManabuTalk (まなぶトーク) v1.0
- *
- * AI対話形式学習アプリのプロトタイプ。
- * 起動 -> 挨拶+雑談 -> 5教科(情報のみ有効) -> 3モード(教えてもらう/問題を解く/テストする)
- * -> テーマ/範囲/コメント入力 -> 「教えてもらう」はYouTube検索へリンク
- *
- * 依存ライブラリゼロ / XMLレイアウトなし / 全画面Kotlinプログラマティック構築
+ * 情報処理安全確保支援士 学習アプリ。
+ * 5タブ構成(ホーム/学習/AI/分析/マイページ)。過去問データはQuestionDataを流用。
+ * XMLレイアウト不使用・プログラマティックKotlin・外部依存なし。
  */
 class MainActivity : Activity() {
 
-    // ---- 配色 ----
-    private val colorBg = Color.parseColor("#12102A")
-    private val colorCard = Color.parseColor("#1F1B45")
-    private val colorAccent = Color.parseColor("#00C2A8")
-    private val colorAccentDim = Color.parseColor("#2E2A5C")
-    private val colorTextMain = Color.parseColor("#FFFFFF")
-    private val colorTextSub = Color.parseColor("#B8B4E0")
-    private val colorDisabled = Color.parseColor("#3A3660")
+    // ---- カラーパレット(セキュリティ系ダーク) ----
+    private val cBg = 0xFF0E1116.toInt()
+    private val cCard = 0xFF19212C.toInt()
+    private val cCard2 = 0xFF222C3A.toInt()
+    private val cAccent = 0xFF2EA6FF.toInt()
+    private val cGreen = 0xFF3DD68C.toInt()
+    private val cRed = 0xFFF2555A.toInt()
+    private val cGold = 0xFFE6B450.toInt()
+    private val cText = 0xFFECF1F8.toInt()
+    private val cSub = 0xFF97A6B6.toInt()
 
-    // ---- 学習データ定義 ----
-    // 教科ごとにテーマ一覧を持つ(将来拡張用)。現状は情報/セキュリティのみ実装。
-    private val subjectThemes = linkedMapOf(
-        "国語" to listOf<String>(),
-        "算数" to listOf<String>(),
-        "理科" to listOf<String>(),
-        "社会" to listOf<String>(),
-        "情報" to listOf("セキュリティ", "午前Ⅰ(共通)")
-    )
-    private val modes = listOf("教えてもらう", "問題を解く", "テストする")
-    private val ranges = listOf("広い", "中間", "狭い")
+    private lateinit var content: FrameLayout
+    private lateinit var tabBar: LinearLayout
+    private var currentTab = 0
 
-    // ---- 状態 ----
-    private var currentSubject: String? = null
-    private var currentMode: String? = null
-    private var selectedTheme: String? = null
-    private var selectedRange: String? = null
-
-    // ---- 雑談ネタ(時間帯別。将来AI生成に差し替え予定) ----
-    private val morningTalks = listOf(
-        "早起きだね。今日はどんな一日にする?",
-        "朝ごはんはもう食べた?",
-        "今日の調子はどう?"
-    )
-    private val afternoonTalks = listOf(
-        "午後もぼちぼちいこう。",
-        "お昼は何食べた?",
-        "ちょっと一息入れる?"
-    )
-    private val eveningTalks = listOf(
-        "今日一日おつかれさま。",
-        "夜はゆっくりできそう?",
-        "今日あった出来事、なんか話す?"
-    )
-    private val chatReplies = listOf(
-        "うんうん、そうなんだ。",
-        "なるほどね。",
-        "へえ、面白いね!",
-        "それでそれで?",
-        "いいね、その調子。"
-    )
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        showGreetingScreen()
-    }
+        Store.init(this)
 
-    // ============================================================
-    // 共通ヘルパー
-    // ============================================================
-
-    private fun dp(v: Int): Int =
-        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
-
-    private fun sp(v: Int): Float =
-        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v.toFloat(), resources.displayMetrics)
-
-    private fun rootLayout(): LinearLayout {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.setBackgroundColor(colorBg)
-        root.setPadding(dp(20), dp(36), dp(20), dp(20))
-        root.layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-        )
-        return root
-    }
+        root.setBackgroundColor(cBg)
 
-    private fun titleText(text: String): TextView {
-        val t = TextView(this)
-        t.text = text
-        t.setTextColor(colorTextMain)
-        t.textSize = 22f
-        t.setTypeface(null, Typeface.BOLD)
-        t.setPadding(0, 0, 0, dp(16))
-        return t
-    }
-
-    private fun backButton(onClick: () -> Unit): Button {
-        val b = Button(this)
-        b.text = "← もどる"
-        b.setTextColor(colorTextSub)
-        b.setBackgroundColor(Color.TRANSPARENT)
-        b.setOnClickListener { onClick() }
-        val lp = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        b.layoutParams = lp
-        return b
-    }
-
-    private fun primaryButton(label: String): Button {
-        val b = Button(this)
-        b.text = label
-        b.setTextColor(Color.WHITE)
-        b.setBackgroundColor(colorAccent)
-        b.setPadding(dp(24), dp(16), dp(24), dp(16))
-        val lp = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        lp.topMargin = dp(12)
-        b.layoutParams = lp
-        return b
-    }
-
-    private fun setButtonEnabled(b: Button, enabled: Boolean) {
-        b.isEnabled = enabled
-        b.setBackgroundColor(if (enabled) colorAccent else colorDisabled)
-        b.setTextColor(if (enabled) Color.WHITE else colorTextSub)
-    }
-
-    // ============================================================
-    // 画面1: 挨拶 + 雑談
-    // ============================================================
-
-    private fun showGreetingScreen() {
-        val root = rootLayout()
-
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        val (greeting, talkPool) = when {
-            hour in 5..10 -> "おはよう!" to morningTalks
-            hour in 11..16 -> "こんにちは!" to afternoonTalks
-            else -> "こんばんは!" to eveningTalks
-        }
-        val opener = talkPool.random()
-
-        root.addView(titleText("$greeting"))
-
-        // 吹き出し風カード
-        val bubble = TextView(this)
-        bubble.text = opener
-        bubble.setTextColor(colorTextMain)
-        bubble.textSize = 16f
-        bubble.setBackgroundColor(colorCard)
-        bubble.setPadding(dp(16), dp(16), dp(16), dp(16))
-        val bubbleLp = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        bubbleLp.bottomMargin = dp(16)
-        bubble.layoutParams = bubbleLp
-        root.addView(bubble)
-
-        // 会話ログ表示エリア
-        val chatLogScroll = ScrollView(this)
-        val chatLogLp = LinearLayout.LayoutParams(
+        content = FrameLayout(this)
+        content.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         )
-        chatLogScroll.layoutParams = chatLogLp
-        val chatLog = LinearLayout(this)
-        chatLog.orientation = LinearLayout.VERTICAL
-        chatLogScroll.addView(chatLog)
-        root.addView(chatLogScroll)
+        root.addView(content)
 
-        // 入力欄 + 送信ボタン
-        val inputRow = LinearLayout(this)
-        inputRow.orientation = LinearLayout.HORIZONTAL
-        inputRow.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        val input = EditText(this)
-        input.hint = "話しかけてみる..."
-        input.setTextColor(colorTextMain)
-        input.setHintTextColor(colorTextSub)
-        input.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        val sendBtn = Button(this)
-        sendBtn.text = "送信"
-        sendBtn.setTextColor(Color.WHITE)
-        sendBtn.setBackgroundColor(colorAccentDim)
-        sendBtn.setOnClickListener {
-            val msg = input.text.toString().trim()
-            if (msg.isNotEmpty()) {
-                addChatLine(chatLog, "あなた", msg, colorTextSub)
-                addChatLine(chatLog, "AI", chatReplies.random(), colorTextMain)
-                input.setText("")
-                chatLogScroll.post { chatLogScroll.fullScroll(View.FOCUS_DOWN) }
-            }
-        }
-        inputRow.addView(input)
-        inputRow.addView(sendBtn)
-        root.addView(inputRow)
-
-        // 勉強するボタン(常時表示)
-        val studyBtn = primaryButton("べんきょうする")
-        studyBtn.setOnClickListener { showSubjectScreen() }
-        root.addView(studyBtn)
+        tabBar = buildTabBar()
+        root.addView(tabBar)
 
         setContentView(root)
-    }
-
-    private fun addChatLine(container: LinearLayout, speaker: String, text: String, color: Int) {
-        val line = TextView(this)
-        line.text = "$speaker: $text"
-        line.setTextColor(color)
-        line.textSize = 14f
-        line.setPadding(0, dp(4), 0, dp(4))
-        container.addView(line)
+        showTab(0)
     }
 
     // ============================================================
-    // 画面2: 5教科選択(情報のみ有効)
+    // 共通UIビルダー
     // ============================================================
 
-    private fun showSubjectScreen() {
-        val root = rootLayout()
-        root.addView(backButton { showGreetingScreen() })
-        root.addView(titleText("なにを べんきょうする?"))
-
-        for ((subject, themes) in subjectThemes) {
-            val enabled = themes.isNotEmpty()
-            val b = Button(this)
-            b.text = if (enabled) subject else "$subject (じゅんびちゅう)"
-            val lp = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            lp.topMargin = dp(10)
-            b.layoutParams = lp
-            b.setPadding(dp(20), dp(18), dp(20), dp(18))
-            if (enabled) {
-                b.setBackgroundColor(colorCard)
-                b.setTextColor(colorTextMain)
-                b.setOnClickListener {
-                    currentSubject = subject
-                    showModeScreen()
-                }
-            } else {
-                b.setBackgroundColor(colorDisabled)
-                b.setTextColor(colorTextSub)
-                b.isEnabled = false
-            }
-            root.addView(b)
-        }
-
-        setContentView(root)
+    private fun rounded(color: Int, radius: Int = 14): GradientDrawable {
+        val g = GradientDrawable()
+        g.setColor(color)
+        g.cornerRadius = dp(radius).toFloat()
+        return g
     }
 
-    // ============================================================
-    // 画面3: 3モード選択(教えてもらう/問題を解く/テストする)
-    // ============================================================
-
-    private fun showModeScreen() {
-        val root = rootLayout()
-        root.addView(backButton { showSubjectScreen() })
-        root.addView(titleText("${currentSubject} - どうやって べんきょうする?"))
-
-        for (mode in modes) {
-            val b = Button(this)
-            b.text = mode
-            b.setBackgroundColor(colorCard)
-            b.setTextColor(colorTextMain)
-            b.setPadding(dp(20), dp(18), dp(20), dp(18))
-            val lp = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            lp.topMargin = dp(10)
-            b.layoutParams = lp
-            b.setOnClickListener {
-                currentMode = mode
-                selectedTheme = null
-                selectedRange = null
-                when (mode) {
-                    "教えてもらう" -> showFormScreen()
-                    "問題を解く" -> showSolveThemeScreen()
-                    "テストする" -> showTestThemeScreen()
-                    else -> showFormScreen()
-                }
-            }
-            root.addView(b)
-        }
-
-        setContentView(root)
-    }
-
-    // ============================================================
-    // 画面4: テーマ/範囲/コメント入力 + 実行ボタン
-    // ============================================================
-
-    private fun showFormScreen() {
-        val root = rootLayout()
-        root.addView(backButton { showModeScreen() })
-        root.addView(titleText("${currentMode}"))
-
-        val themeList = subjectThemes[currentSubject] ?: listOf()
-
-        // --- テーマ選択 ---
-        root.addView(fieldLabel("テーマ"))
-        val themeSpinner = Spinner(this)
-        val themeAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, themeList)
-        themeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        themeSpinner.adapter = themeAdapter
-        themeSpinner.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        root.addView(themeSpinner)
-
-        // --- 範囲選択 ---
-        root.addView(fieldLabel("範囲"))
-        val rangeGroup = RadioGroup(this)
-        rangeGroup.orientation = RadioGroup.HORIZONTAL
-        val radioButtons = mutableListOf<RadioButton>()
-        for (r in ranges) {
-            val rb = RadioButton(this)
-            rb.text = r
-            rb.setTextColor(colorTextMain)
-            rangeGroup.addView(rb)
-            radioButtons.add(rb)
-        }
-        root.addView(rangeGroup)
-
-        // --- コメント入力(20文字以内) ---
-        root.addView(fieldLabel("コメント (じゆうきさい・20文字まで)"))
-        val commentInput = EditText(this)
-        commentInput.hint = "例: パスワードの作り方"
-        commentInput.setTextColor(colorTextMain)
-        commentInput.setHintTextColor(colorTextSub)
-        commentInput.filters = arrayOf(InputFilter.LengthFilter(20))
-        commentInput.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        root.addView(commentInput)
-
-        val counter = TextView(this)
-        counter.text = "0/20"
-        counter.setTextColor(colorTextSub)
-        counter.textSize = 12f
-        counter.gravity = Gravity.END
-        root.addView(counter)
-
-        // --- 実行ボタン ---
-        val actionBtn = primaryButton(currentMode ?: "実行")
-        setButtonEnabled(actionBtn, false)
-        root.addView(actionBtn)
-
-        fun validate() {
-            val hasTheme = themeSpinner.selectedItem != null
-            val hasRange = radioButtons.any { it.isChecked }
-            val hasComment = commentInput.text.toString().trim().isNotEmpty()
-            setButtonEnabled(actionBtn, hasTheme && hasRange && hasComment)
-        }
-
-        themeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                selectedTheme = themeList.getOrNull(pos)
-                validate()
-            }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
-        for (rb in radioButtons) {
-            rb.setOnClickListener {
-                selectedRange = rb.text.toString()
-                validate()
-            }
-        }
-        commentInput.addTextChangedListener(object : TextWatcher {
-            override fun afterTextChanged(s: Editable?) {
-                counter.text = "${s?.length ?: 0}/20"
-                validate()
-            }
-            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-        })
-
-        actionBtn.setOnClickListener {
-            val comment = commentInput.text.toString().trim()
-            when (currentMode) {
-                "教えてもらう" -> openYoutubeSearch(selectedTheme ?: "", selectedRange ?: "", comment)
-                else -> Toast.makeText(
-                    this, "この機能は開発中です。次のアップデートをお楽しみに!", Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-
-        setContentView(root)
-    }
-
-    private fun fieldLabel(text: String): TextView {
+    private fun tv(text: String, size: Float, color: Int, bold: Boolean = false): TextView {
         val t = TextView(this)
         t.text = text
-        t.setTextColor(colorTextSub)
-        t.textSize = 13f
-        val lp = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        lp.topMargin = dp(16)
-        lp.bottomMargin = dp(4)
-        t.layoutParams = lp
+        t.textSize = size
+        t.setTextColor(color)
+        if (bold) t.setTypeface(t.typeface, Typeface.BOLD)
         return t
     }
 
-    // ============================================================
-    // テーマ選択(セキュリティ=午前Ⅱ / 午前Ⅰ共通)
-    // ============================================================
+    private fun spacer(h: Int): View {
+        val v = View(this)
+        v.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(h))
+        return v
+    }
 
-    private fun themeButton(label: String, onClick: () -> Unit): Button {
-        val b = Button(this)
-        b.text = label
-        b.setBackgroundColor(colorCard)
-        b.setTextColor(colorTextMain)
-        b.isAllCaps = false
-        b.setPadding(dp(20), dp(18), dp(20), dp(18))
-        val lp = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        lp.topMargin = dp(10)
+    private fun card(): LinearLayout {
+        val c = LinearLayout(this)
+        c.orientation = LinearLayout.VERTICAL
+        c.background = rounded(cCard)
+        c.setPadding(dp(16), dp(16), dp(16), dp(16))
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(12)
+        c.layoutParams = lp
+        return c
+    }
+
+    private fun bigButton(label: String, sub: String?, bg: Int, onClick: () -> Unit): View {
+        val b = LinearLayout(this)
+        b.orientation = LinearLayout.VERTICAL
+        b.background = rounded(bg)
+        b.setPadding(dp(18), dp(16), dp(18), dp(16))
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(12)
         b.layoutParams = lp
+        b.addView(tv(label, 17f, Color.WHITE, true))
+        if (sub != null) {
+            val s = tv(sub, 12.5f, 0xFFE7F0FA.toInt())
+            s.setPadding(0, dp(3), 0, 0)
+            b.addView(s)
+        }
         b.setOnClickListener { onClick() }
         return b
     }
 
-    // 「問題を解く」→ テーマ選択
-    private fun showSolveThemeScreen() {
-        val root = rootLayout()
-        root.addView(backButton { showModeScreen() })
-        root.addView(titleText("問題を解く - テーマを選ぶ"))
-        root.addView(themeButton("セキュリティ (午前Ⅱ)") {
-            val pool = QuestionData.am2ByYear.values.flatten()
-            showRandomFromPool(pool) { showSolveThemeScreen() }
-        })
-        root.addView(themeButton("午前Ⅰ(共通)") {
-            val pool = QuestionData.am1ByYear.values.flatten()
-            showRandomFromPool(pool) { showSolveThemeScreen() }
-        })
-        setContentView(root)
+    private fun listButton(label: String, sub: String? = null, onClick: () -> Unit): View {
+        val b = LinearLayout(this)
+        b.orientation = LinearLayout.HORIZONTAL
+        b.gravity = Gravity.CENTER_VERTICAL
+        b.background = rounded(cCard2)
+        b.setPadding(dp(16), dp(14), dp(16), dp(14))
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(10)
+        b.layoutParams = lp
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        col.addView(tv(label, 15.5f, cText, true))
+        if (sub != null) col.addView(tv(sub, 12f, cSub))
+        b.addView(col)
+        b.addView(tv("›", 20f, cSub))
+        b.setOnClickListener { onClick() }
+        return b
     }
 
-    private fun showRandomFromPool(pool: List<QuestionData.Question>, onBack: () -> Unit) {
+    private fun pill(text: String, color: Int): TextView {
+        val t = tv(text, 12f, Color.WHITE, true)
+        t.background = rounded(color, 20)
+        t.setPadding(dp(10), dp(4), dp(10), dp(4))
+        return t
+    }
+
+    /** 画面の骨組み。ScrollView+縦LinearLayout。backがあれば戻るボタンを上部に置く。 */
+    private fun screen(title: String, back: (() -> Unit)? = null, build: (LinearLayout) -> Unit): View {
+        val sv = ScrollView(this)
+        sv.isFillViewport = true
+        sv.setBackgroundColor(cBg)
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.setPadding(dp(16), dp(16), dp(16), dp(24))
+        if (back != null) {
+            val bk = tv("‹ もどる", 14f, cAccent, true)
+            bk.setPadding(0, 0, 0, dp(10))
+            bk.setOnClickListener { back() }
+            col.addView(bk)
+        }
+        col.addView(tv(title, 22f, cText, true))
+        col.addView(spacer(12))
+        build(col)
+        sv.addView(col)
+        return sv
+    }
+
+    private fun setContent(v: View) {
+        content.removeAllViews()
+        content.addView(v, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
+    // ============================================================
+    // ボトムタブ
+    // ============================================================
+    private val tabLabels = listOf("ホーム", "学習", "AI", "分析", "マイ")
+
+    private fun buildTabBar(): LinearLayout {
+        val bar = LinearLayout(this)
+        bar.orientation = LinearLayout.HORIZONTAL
+        bar.setBackgroundColor(0xFF141C26.toInt())
+        bar.setPadding(0, dp(6), 0, dp(6))
+        for (i in tabLabels.indices) {
+            val item = tv(tabLabels[i], 12.5f, cSub, true)
+            item.gravity = Gravity.CENTER
+            item.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            item.setPadding(0, dp(8), 0, dp(8))
+            item.setOnClickListener { showTab(i) }
+            bar.addView(item)
+        }
+        return bar
+    }
+
+    private fun refreshTabHighlight() {
+        for (i in tabLabels.indices) {
+            (tabBar.getChildAt(i) as TextView).setTextColor(if (i == currentTab) cAccent else cSub)
+        }
+    }
+
+    private fun showTab(i: Int) {
+        currentTab = i
+        refreshTabHighlight()
+        when (i) {
+            0 -> showHome()
+            1 -> showStudyHome()
+            2 -> showAiHome()
+            3 -> showAnalysis()
+            4 -> showMyPage()
+        }
+    }
+
+    // ============================================================
+    // タブ0: ホーム
+    // ============================================================
+    private fun showHome() {
+        val greet = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+            in 4..10 -> "おはようございます"
+            in 11..17 -> "こんにちは"
+            else -> "こんばんは"
+        }
+        setContent(screen(greet) { col ->
+            // ステータスカード
+            val c = card()
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.addView(statBlock("連続", "${Store.streak()}日"))
+            row.addView(statBlock("今日", if (Store.answeredToday()) "学習済" else "未学習"))
+            row.addView(statBlock("正答率", "${Store.overallRate()}%"))
+            c.addView(row)
+            col.addView(c)
+
+            col.addView(tv("今日のメニュー", 16f, cText, true))
+            col.addView(spacer(8))
+            col.addView(bigButton("クイック学習", "ランダム10問で腕試し", cAccent) { startRandom(10) })
+            col.addView(bigButton("復習する", reviewSub(), 0xFF7A5AF8.toInt()) { showReview() })
+            col.addView(bigButton("模試に挑戦", "1年度分を通しで採点", 0xFF15A6A0.toInt()) { showMockPick() })
+
+            // おすすめ(弱点セクション)
+            val weak = weakestSection()
+            if (weak != null) {
+                col.addView(spacer(4))
+                val rec = card()
+                rec.addView(tv("AIのおすすめ", 13f, cGold, true))
+                rec.addView(spacer(4))
+                rec.addView(tv(weak.second, 14f, cText))
+                rec.addView(spacer(8))
+                rec.addView(listButton("この分野を練習する") {
+                    startRandomPool(sectionPool(weak.first), weak.first)
+                })
+                col.addView(rec)
+            }
+        })
+    }
+
+    private fun statBlock(label: String, value: String): View {
+        val b = LinearLayout(this)
+        b.orientation = LinearLayout.VERTICAL
+        b.gravity = Gravity.CENTER
+        b.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        b.addView(tv(value, 20f, cAccent, true).apply { gravity = Gravity.CENTER })
+        b.addView(tv(label, 12f, cSub).apply { gravity = Gravity.CENTER })
+        return b
+    }
+
+    private fun reviewSub(): String {
+        val n = Store.wrongCount()
+        return if (n == 0) "間違えた問題がここに溜まります" else "間違えた問題が${n}問"
+    }
+
+    private fun weakestSection(): Pair<String, String>? {
+        val am2 = Store.sectionAtt("am2")
+        val am1 = Store.sectionAtt("am1")
+        if (am2 + am1 < 5) return null
+        val r2 = Store.sectionRate("am2")
+        val r1 = Store.sectionRate("am1")
+        return if (am1 > 0 && (am2 == 0 || r1 <= r2))
+            "am1" to "午前Ⅰ(共通)の正答率が${r1}%。ここを重点的に。"
+        else
+            "am2" to "午前Ⅱ(セキュリティ)の正答率が${r2}%。ここを重点的に。"
+    }
+
+    // ============================================================
+    // タブ1: 学習
+    // ============================================================
+    private fun showStudyHome() {
+        setContent(screen("学習") { col ->
+            col.addView(sectionHeader("問題演習"))
+            col.addView(listButton("午前Ⅱ (セキュリティ)", "${countQ("am2")}問 / ${QuestionData.am2ByYear.size}年度") {
+                showYearList("am2")
+            })
+            col.addView(listButton("午前Ⅰ (共通)", "${countQ("am1")}問 / ${QuestionData.am1ByYear.size}年度") {
+                showYearList("am1")
+            })
+            col.addView(listButton("午後 (記述式・公式PDF)", "${QuestionData.pmExams.size}回分") {
+                showPmList()
+            })
+            col.addView(spacer(6))
+            col.addView(sectionHeader("インプット"))
+            col.addView(listButton("単語帳", "問題で覚える一問一答フラッシュカード") { showFlashcards() })
+            col.addView(listButton("用語辞典", "${Glossary.terms.size}語を検索") { showGlossary() })
+        })
+    }
+
+    private fun sectionHeader(t: String): View {
+        val v = tv(t, 14f, cGold, true)
+        v.setPadding(dp(2), dp(4), 0, dp(8))
+        return v
+    }
+
+    private fun countQ(section: String): Int =
+        mapOf("am2" to QuestionData.am2ByYear, "am1" to QuestionData.am1ByYear)[section]!!
+            .values.sumOf { it.size }
+
+    private fun sectionMap(section: String) =
+        if (section == "am2") QuestionData.am2ByYear else QuestionData.am1ByYear
+
+    private fun sectionLabel(section: String) = if (section == "am2") "午前Ⅱ" else "午前Ⅰ"
+
+    private fun sectionPool(section: String): List<QuestionData.Question> =
+        sectionMap(section).values.flatten()
+
+    private fun showYearList(section: String) {
+        setContent(screen("${sectionLabel(section)} - 年度を選ぶ", back = { showStudyHome() }) { col ->
+            col.addView(bigButton("全年度からランダム", "${countQ(section)}問からランダム出題", cAccent) {
+                startRandomPool(sectionPool(section), section)
+            })
+            col.addView(spacer(4))
+            for ((year, list) in sectionMap(section)) {
+                val rate = Store.yearRate(section, year)
+                val att = Store.yearAtt(section, year)
+                val sub = if (att == 0) "${list.size}問 ・ 未挑戦" else "${list.size}問 ・ 正答率${rate}%"
+                col.addView(listButton(year, sub) { showYearMenu(section, year, list) })
+            }
+        })
+    }
+
+    private fun showYearMenu(section: String, year: String, list: List<QuestionData.Question>) {
+        setContent(screen("${sectionLabel(section)} $year", back = { showYearList(section) }) { col ->
+            col.addView(bigButton("テスト形式で解く", "${list.size}問を順番に・自動採点", cAccent) {
+                startSequential(section, year, list, 0, ArrayList())
+            })
+            col.addView(bigButton("この年度からランダム", "1問ずつランダム出題", 0xFF15A6A0.toInt()) {
+                startRandomPool(list, section)
+            })
+        })
+    }
+
+    private fun showPmList() {
+        setContent(screen("午後 (記述式)", back = { showStudyHome() }) { col ->
+            col.addView(tv("公式の問題冊子・解答例(PDF)を開きます。記述式は自己採点し、AIタブの自己添削も活用してください。", 13f, cSub))
+            col.addView(spacer(12))
+            for (pm in QuestionData.pmExams) {
+                val c = card()
+                c.addView(tv(pm.label, 15f, cText, true))
+                c.addView(spacer(8))
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                val b1 = smallBtn("問題PDF", cAccent) { openUrl(pm.questionsPdf) }
+                val b2 = smallBtn("解答例PDF", cCard2) { openUrl(pm.answersPdf) }
+                row.addView(b1)
+                row.addView(spacer2(10))
+                row.addView(b2)
+                c.addView(row)
+                col.addView(c)
+            }
+        })
+    }
+
+    private fun smallBtn(label: String, bg: Int, onClick: () -> Unit): View {
+        val b = tv(label, 13.5f, Color.WHITE, true)
+        b.gravity = Gravity.CENTER
+        b.background = rounded(bg, 10)
+        b.setPadding(dp(14), dp(10), dp(14), dp(10))
+        b.setOnClickListener { onClick() }
+        return b
+    }
+
+    private fun spacer2(w: Int): View {
+        val v = View(this)
+        v.layoutParams = LinearLayout.LayoutParams(dp(w), 1)
+        return v
+    }
+
+    // ============================================================
+    // 問題演習エンジン
+    // ============================================================
+
+    /** 単発ランダム(n問で終了) */
+    private fun startRandom(n: Int) {
+        val pool = (QuestionData.am2ByYear.values.flatten() + QuestionData.am1ByYear.values.flatten())
+        runRandomSession(pool, n, 0, ArrayList())
+    }
+
+    private fun runRandomSession(pool: List<QuestionData.Question>, total: Int, idx: Int, results: ArrayList<Boolean>) {
+        if (idx >= total) { showSessionResult(results, "クイック学習") { showTab(0) }; return }
+        val q = pool.random()
+        val section = sectionOf(q)
+        showQuestion(section, q, "${idx + 1} / $total", { showTab(0) }) { correct ->
+            results.add(correct)
+            runRandomSession(pool, total, idx + 1, results)
+        }
+    }
+
+    /** 無限ランダム(戻るまで) */
+    private fun startRandomPool(pool: List<QuestionData.Question>, section: String) {
         if (pool.isEmpty()) return
         val q = pool.random()
-        showQuestionScreen(q, onBack = onBack, onNext = { showRandomFromPool(pool, onBack) }, nextLabel = "次の問題")
-    }
-
-    // 「テストする」→ テーマ選択
-    private fun showTestThemeScreen() {
-        val root = rootLayout()
-        root.addView(backButton { showModeScreen() })
-        root.addView(titleText("テスト - テーマを選ぶ"))
-        root.addView(themeButton("セキュリティ (午前Ⅱ・午後)") { showTestKindScreen() })
-        root.addView(themeButton("午前Ⅰ(共通)") { showAm1YearScreen() })
-        setContentView(root)
-    }
-
-    // ---- 午前Ⅰ: 年度選択 → 順番に出題 ----
-    private fun showAm1YearScreen() {
-        val root = rootLayout()
-        root.addView(backButton { showTestThemeScreen() })
-        root.addView(titleText("午前Ⅰ(共通) - 年度を選ぶ"))
-        for ((year, list) in QuestionData.am1ByYear) {
-            root.addView(themeButton("$year (${list.size}問)") { showAm1TestQuestion(year, list, 0) })
+        showQuestion(section, q, "ランダム", { showTab(currentTab) }) {
+            startRandomPool(pool, section)
         }
-        setContentView(root)
     }
 
-    private fun showAm1TestQuestion(year: String, list: List<QuestionData.Question>, index: Int) {
-        if (index >= list.size) {
-            showAm1TestDone()
+    /** テスト形式(年度を順番に、最後に採点) */
+    private fun startSequential(section: String, year: String, list: List<QuestionData.Question>, idx: Int, results: ArrayList<Boolean>) {
+        if (idx >= list.size) {
+            showSessionResult(results, "$year ${sectionLabel(section)}") { showYearMenu(section, year, list) }
             return
         }
-        val q = list[index]
-        showQuestionScreen(
-            q,
-            onBack = { showAm1YearScreen() },
-            onNext = { showAm1TestQuestion(year, list, index + 1) },
-            nextLabel = if (index + 1 >= list.size) "結果へ" else "次へ (${index + 2}/${list.size})"
-        )
+        showQuestion(section, list[idx], "${idx + 1} / ${list.size}", { showYearList(section) }) { correct ->
+            results.add(correct)
+            startSequential(section, year, list, idx + 1, results)
+        }
     }
 
-    private fun showAm1TestDone() {
-        val root = rootLayout()
-        root.addView(titleText("午前Ⅰ(共通) おつかれさま!"))
-        val msg = TextView(this)
-        msg.text = "全問終了しました。もう一度挑戦するか、別のメニューを選べます。"
-        msg.setTextColor(colorTextMain)
-        msg.textSize = 15f
-        msg.setBackgroundColor(colorCard)
-        msg.setPadding(dp(16), dp(16), dp(16), dp(16))
-        root.addView(msg)
-        val again = primaryButton("年度選択にもどる")
-        again.setOnClickListener { showAm1YearScreen() }
-        root.addView(again)
-        val home = primaryButton("さいしょの画面へ")
-        home.setOnClickListener { showGreetingScreen() }
-        root.addView(home)
-        setContentView(root)
-    }
-
-    // ============================================================
-    // 「問題を解く」-> 過去問からランダムに1問出題
-    // ============================================================
-
-    private fun showRandomQuestionScreen() {
-        val pool = QuestionData.am2ByYear.values.flatten()
-        val q = pool.random()
-        showQuestionScreen(q, onBack = { showModeScreen() }, onNext = { showRandomQuestionScreen() }, nextLabel = "次の問題")
-    }
+    private fun sectionOf(q: QuestionData.Question): String =
+        if (QuestionData.am1ByYear.values.any { l -> l.any { it === q } }) "am1" else "am2"
 
     /**
-     * 1問を表示する共通画面。
-     * choices があれば4択タップで自動採点、なければ「答えを見る」で正解＋解説を表示。
+     * 問題画面。選択肢タップで自動採点・色分け・解説表示、記録して onDone(correct)。
      */
-    private fun showQuestionScreen(
+    private fun showQuestion(
+        section: String,
         q: QuestionData.Question,
+        progress: String,
         onBack: () -> Unit,
-        onNext: () -> Unit,
-        nextLabel: String
+        onDone: (Boolean) -> Unit
     ) {
-        val root = rootLayout()
-        root.addView(backButton { onBack() })
+        val choices = q.choices
+        setContent(screen("${sectionLabel(section)}  問${q.no}", back = onBack) { col ->
+            val meta = LinearLayout(this)
+            meta.orientation = LinearLayout.HORIZONTAL
+            meta.gravity = Gravity.CENTER_VERTICAL
+            meta.addView(pill(q.year, cCard2))
+            meta.addView(spacer2(8))
+            meta.addView(tv(progress, 12f, cSub))
+            col.addView(meta)
+            col.addView(spacer(12))
 
-        val header = TextView(this)
-        header.text = "${q.year} 午前Ⅱ 問${q.no}"
-        header.setTextColor(colorTextSub)
-        header.textSize = 13f
-        header.setPadding(0, 0, 0, dp(8))
-        root.addView(header)
+            val qc = card()
+            qc.addView(tv(q.text, 15.5f, cText))
+            col.addView(qc)
 
-        val scroll = ScrollView(this)
-        scroll.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-        )
-        val content = LinearLayout(this)
-        content.orientation = LinearLayout.VERTICAL
-        scroll.addView(content)
-        root.addView(scroll)
+            if (choices == null) { onDone(true); return@screen }
 
-        val question = TextView(this)
-        question.text = q.text
-        question.setTextColor(colorTextMain)
-        question.textSize = 16f
-        question.setBackgroundColor(colorCard)
-        question.setPadding(dp(16), dp(16), dp(16), dp(16))
-        val qLp = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        qLp.bottomMargin = dp(12)
-        question.layoutParams = qLp
-        content.addView(question)
-
-        // 結果・解説表示エリア
-        val resultBox = TextView(this)
-        resultBox.setTextColor(colorTextMain)
-        resultBox.textSize = 15f
-        resultBox.setPadding(dp(16), dp(16), dp(16), dp(16))
-        resultBox.visibility = View.GONE
-        val rLp = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        rLp.topMargin = dp(12)
-        resultBox.layoutParams = rLp
-
-        val labels = listOf("ア", "イ", "ウ", "エ")
-
-        fun revealExplanation() {
-            resultBox.visibility = View.VISIBLE
-            resultBox.text = "正解: ${q.answerText}\n\n【解説】\n${q.explanation}"
-            resultBox.setBackgroundColor(colorAccentDim)
-        }
-
-        if (q.choices != null) {
-            // 4択・自動採点
-            val choiceButtons = mutableListOf<Button>()
+            val labels = listOf("ア", "イ", "ウ", "エ")
+            val buttons = ArrayList<TextView>()
             var answered = false
-            for ((i, c) in q.choices.withIndex()) {
-                val b = Button(this)
-                b.text = "${labels[i]}. $c"
-                b.setTextColor(colorTextMain)
-                b.setBackgroundColor(colorCard)
-                b.setPadding(dp(16), dp(14), dp(16), dp(14))
-                b.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                b.isAllCaps = false
-                val lp = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-                lp.topMargin = dp(8)
-                b.layoutParams = lp
-                b.setOnClickListener {
+            val explanationHolder = LinearLayout(this)
+            explanationHolder.orientation = LinearLayout.VERTICAL
+
+            for (i in choices.indices) {
+                val btn = tv("${labels[i]}  ${choices[i]}", 14.5f, cText)
+                btn.background = rounded(cCard2)
+                btn.setPadding(dp(14), dp(13), dp(14), dp(13))
+                val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                lp.bottomMargin = dp(10)
+                btn.layoutParams = lp
+                btn.setOnClickListener {
                     if (answered) return@setOnClickListener
                     answered = true
-                    for ((j, bb) in choiceButtons.withIndex()) {
+                    val correct = i == q.answerIndex
+                    for (j in buttons.indices) {
                         when (j) {
-                            q.answerIndex -> bb.setBackgroundColor(Color.parseColor("#1E7D5A"))
-                            i -> if (i != q.answerIndex) bb.setBackgroundColor(Color.parseColor("#8A2C2C"))
+                            q.answerIndex -> buttons[j].background = rounded(cGreen)
+                            i -> if (!correct) buttons[j].background = rounded(cRed)
                         }
+                        if (j == q.answerIndex || (j == i && !correct))
+                            buttons[j].setTextColor(Color.WHITE)
                     }
-                    revealExplanation()
-                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+                    Store.recordAnswer(section, q.year, q.no, correct)
+                    // 解説
+                    val ec = card()
+                    ec.background = rounded(if (correct) 0xFF14331F.toInt() else 0xFF3A1B1D.toInt())
+                    ec.addView(tv(if (correct) "正解！" else "不正解", 15f, if (correct) cGreen else cRed, true))
+                    ec.addView(spacer(6))
+                    ec.addView(tv("正解: ${q.answerText}", 14f, cText, true))
+                    ec.addView(spacer(6))
+                    ec.addView(tv(q.explanation, 13.5f, 0xFFD7E0EA.toInt()))
+                    explanationHolder.addView(ec)
+                    val next = bigButton("次へ", null, cAccent) { onDone(correct) }
+                    explanationHolder.addView(next)
                 }
-                choiceButtons.add(b)
-                content.addView(b)
+                buttons.add(btn)
+                col.addView(btn)
             }
-            content.addView(resultBox)
-        } else {
-            // 一問一答・自己採点(答えを見る)
-            content.addView(resultBox)
-            val showAnsBtn = primaryButton("答えを見る")
-            showAnsBtn.setOnClickListener {
-                revealExplanation()
-                scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-            }
-            content.addView(showAnsBtn)
-        }
+            col.addView(explanationHolder)
+        })
+    }
 
-        // 下部: 次の問題
-        val nextBtn = primaryButton(nextLabel)
-        nextBtn.setOnClickListener { onNext() }
-        root.addView(nextBtn)
-
-        setContentView(root)
+    private fun showSessionResult(results: List<Boolean>, title: String, onClose: () -> Unit) {
+        val correct = results.count { it }
+        val total = results.size
+        val rate = if (total == 0) 0 else correct * 100 / total
+        setContent(screen("結果") { col ->
+            val c = card()
+            c.addView(tv(title, 14f, cSub))
+            c.addView(spacer(6))
+            c.addView(tv("$correct / $total 問正解", 26f, cText, true))
+            c.addView(spacer(6))
+            c.addView(tv("正答率 $rate%", 16f, if (rate >= 60) cGreen else cGold, true))
+            col.addView(c)
+            if (total > 0 && rate < 60)
+                col.addView(tv("合格ラインの目安は60%。間違えた問題は復習キューに入りました。", 13f, cSub))
+            col.addView(spacer(12))
+            col.addView(bigButton("復習する", "間違えた問題をもう一度", 0xFF7A5AF8.toInt()) { showReview() })
+            col.addView(listButton("とじる") { onClose() })
+        })
     }
 
     // ============================================================
-    // 「テストする」-> 午前Ⅱ / 午後 の選択
+    // 復習(忘却曲線 + 間違えた問題)
     // ============================================================
-
-    private fun showTestKindScreen() {
-        val root = rootLayout()
-        root.addView(backButton { showTestThemeScreen() })
-        root.addView(titleText("テスト - どちらを受ける?"))
-
-        val am2 = Button(this)
-        am2.text = "午前Ⅱ (4択・年度別)"
-        am2.setBackgroundColor(colorCard)
-        am2.setTextColor(colorTextMain)
-        am2.setPadding(dp(20), dp(18), dp(20), dp(18))
-        val lp1 = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        lp1.topMargin = dp(10)
-        am2.layoutParams = lp1
-        am2.setOnClickListener { showAm2YearScreen() }
-        root.addView(am2)
-
-        val pm = Button(this)
-        pm.text = "午後 (記述・年度別PDF)"
-        pm.setBackgroundColor(colorCard)
-        pm.setTextColor(colorTextMain)
-        pm.setPadding(dp(20), dp(18), dp(20), dp(18))
-        val lp2 = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        lp2.topMargin = dp(10)
-        pm.layoutParams = lp2
-        pm.setOnClickListener { showPmYearScreen() }
-        root.addView(pm)
-
-        setContentView(root)
+    private fun resolveId(id: String): Pair<String, QuestionData.Question>? {
+        val parts = id.split("|")
+        if (parts.size != 3) return null
+        val (sec, year, noStr) = parts
+        val no = noStr.toIntOrNull() ?: return null
+        val list = sectionMap(sec)[year] ?: return null
+        val q = list.firstOrNull { it.no == no } ?: return null
+        return sec to q
     }
 
-    // ---- 午前Ⅱ: 年度選択 ----
-    private fun showAm2YearScreen() {
-        val root = rootLayout()
-        root.addView(backButton { showTestKindScreen() })
-        root.addView(titleText("午前Ⅱ - 年度を選ぶ"))
-
-        for ((year, list) in QuestionData.am2ByYear) {
-            val b = Button(this)
-            b.text = "$year (${list.size}問)"
-            b.setBackgroundColor(colorCard)
-            b.setTextColor(colorTextMain)
-            b.setPadding(dp(20), dp(18), dp(20), dp(18))
-            val lp = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            lp.topMargin = dp(10)
-            b.layoutParams = lp
-            b.setOnClickListener { startAm2Test(year, list) }
-            root.addView(b)
-        }
-
-        setContentView(root)
-    }
-
-    // ---- 午前Ⅱ: 年度内を順番に出題 ----
-    private fun startAm2Test(year: String, list: List<QuestionData.Question>) {
-        showAm2TestQuestion(year, list, 0)
-    }
-
-    private fun showAm2TestQuestion(year: String, list: List<QuestionData.Question>, index: Int) {
-        if (index >= list.size) {
-            showAm2TestDone(year)
+    private fun showReview() {
+        val ids = (Store.dueIds() + Store.wrongIds()).distinct()
+        val queue = ids.mapNotNull { resolveId(it) }
+        if (queue.isEmpty()) {
+            setContent(screen("復習") { col ->
+                val c = card()
+                c.addView(tv("いま復習する問題はありません", 15f, cText, true))
+                c.addView(spacer(6))
+                c.addView(tv("問題を解いて間違えると、ここに復習キューとして溜まります。忘却曲線に沿って最適なタイミングで再出題します。", 13f, cSub))
+                col.addView(c)
+                col.addView(bigButton("クイック学習をする", null, cAccent) { startRandom(10) })
+            })
             return
         }
-        val q = list[index]
-        showQuestionScreen(
-            q,
-            onBack = { showAm2YearScreen() },
-            onNext = { showAm2TestQuestion(year, list, index + 1) },
-            nextLabel = if (index + 1 >= list.size) "結果へ" else "次へ (${index + 2}/${list.size})"
-        )
+        runReview(queue, 0, ArrayList())
     }
 
-    private fun showAm2TestDone(year: String) {
-        val root = rootLayout()
-        root.addView(titleText("$year 午前Ⅱ おつかれさま!"))
-        val msg = TextView(this)
-        msg.text = "全問終了しました。もう一度挑戦するか、別の年度を選べます。"
-        msg.setTextColor(colorTextMain)
-        msg.textSize = 15f
-        msg.setBackgroundColor(colorCard)
-        msg.setPadding(dp(16), dp(16), dp(16), dp(16))
-        root.addView(msg)
-
-        val again = primaryButton("年度選択にもどる")
-        again.setOnClickListener { showAm2YearScreen() }
-        root.addView(again)
-
-        val home = primaryButton("さいしょの画面へ")
-        home.setOnClickListener { showGreetingScreen() }
-        root.addView(home)
-
-        setContentView(root)
-    }
-
-    // ---- 午後: 年度選択 -> 公式PDFを開く ----
-    private fun showPmYearScreen() {
-        val root = rootLayout()
-        root.addView(backButton { showTestKindScreen() })
-        root.addView(titleText("午後 - 年度を選ぶ"))
-
-        val note = TextView(this)
-        note.text = "午後は記述式のため、IPA公式の問題PDFを開きます(自己採点)。"
-        note.setTextColor(colorTextSub)
-        note.textSize = 12f
-        note.setPadding(0, 0, 0, dp(8))
-        root.addView(note)
-
-        for (exam in QuestionData.pmExams) {
-            val qBtn = Button(this)
-            qBtn.text = "${exam.label} - 問題PDF"
-            qBtn.setBackgroundColor(colorCard)
-            qBtn.setTextColor(colorTextMain)
-            qBtn.setPadding(dp(20), dp(16), dp(20), dp(16))
-            qBtn.isAllCaps = false
-            val lp = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            lp.topMargin = dp(10)
-            qBtn.layoutParams = lp
-            qBtn.setOnClickListener { openUrl(exam.questionsPdf) }
-            root.addView(qBtn)
-
-            val aBtn = Button(this)
-            aBtn.text = "${exam.label} - 解答例PDF"
-            aBtn.setBackgroundColor(colorAccentDim)
-            aBtn.setTextColor(colorTextMain)
-            aBtn.setPadding(dp(20), dp(12), dp(20), dp(12))
-            aBtn.isAllCaps = false
-            val lp2 = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            lp2.topMargin = dp(4)
-            aBtn.layoutParams = lp2
-            aBtn.setOnClickListener { openUrl(exam.answersPdf) }
-            root.addView(aBtn)
+    private fun runReview(queue: List<Pair<String, QuestionData.Question>>, idx: Int, results: ArrayList<Boolean>) {
+        if (idx >= queue.size) { showSessionResult(results, "復習") { showTab(currentTab) }; return }
+        val (section, q) = queue[idx]
+        showQuestion(section, q, "復習 ${idx + 1} / ${queue.size}", { showTab(currentTab) }) { correct ->
+            results.add(correct)
+            runReview(queue, idx + 1, results)
         }
-
-        setContentView(root)
     }
 
+    // ============================================================
+    // 模試
+    // ============================================================
+    private fun showMockPick() {
+        setContent(screen("模試") { col ->
+            col.addView(tv("1年度分を通しで解き、最後に採点します。", 13f, cSub))
+            col.addView(spacer(12))
+            col.addView(sectionHeader("午前Ⅱ (セキュリティ・25問)"))
+            for ((year, list) in QuestionData.am2ByYear)
+                col.addView(listButton("$year", "${list.size}問") { startSequential("am2", year, list, 0, ArrayList()) })
+            col.addView(spacer(6))
+            col.addView(sectionHeader("午前Ⅰ (共通・30問)"))
+            for ((year, list) in QuestionData.am1ByYear)
+                col.addView(listButton("$year", "${list.size}問") { startSequential("am1", year, list, 0, ArrayList()) })
+        })
+    }
+
+    // ============================================================
+    // 単語帳(フラッシュカード)
+    // ============================================================
+    private fun showFlashcards() {
+        val pool = (QuestionData.am2ByYear.values.flatten() + QuestionData.am1ByYear.values.flatten())
+        // 復習期限が来ているものを優先、なければランダム
+        val due = Store.dueIds().mapNotNull { resolveId(it) }
+        val q = if (due.isNotEmpty()) due.random().second else pool.random()
+        val section = sectionOf(q)
+        flashCard(section, q)
+    }
+
+    private fun flashCard(section: String, q: QuestionData.Question) {
+        setContent(screen("単語帳", back = { showStudyHome() }) { col ->
+            val c = card()
+            c.addView(pill("${sectionLabel(section)} ${q.year} 問${q.no}", cCard2))
+            c.addView(spacer(10))
+            c.addView(tv(q.text, 15.5f, cText))
+            col.addView(c)
+
+            val answerHolder = LinearLayout(this)
+            answerHolder.orientation = LinearLayout.VERTICAL
+            col.addView(answerHolder)
+
+            col.addView(bigButton("答えを見る", null, cAccent) {
+                if (answerHolder.childCount > 0) return@bigButton
+                val ac = card()
+                ac.background = rounded(cCard2)
+                ac.addView(tv("正解: ${q.answerText}", 15f, cGreen, true))
+                if (q.choices != null) {
+                    ac.addView(spacer(4))
+                    ac.addView(tv(q.choices[q.answerIndex], 14f, cText))
+                }
+                ac.addView(spacer(8))
+                ac.addView(tv(q.explanation, 13.5f, 0xFFD7E0EA.toInt()))
+                answerHolder.addView(ac)
+
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                val ok = smallBtn("覚えた", cGreen) {
+                    Store.recordFlash(Store.qid(section, q.year, q.no), true); showFlashcards()
+                }
+                ok.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                val ng = smallBtn("まだ", cRed) {
+                    Store.recordFlash(Store.qid(section, q.year, q.no), false); showFlashcards()
+                }
+                ng.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                row.addView(ok); row.addView(spacer2(10)); row.addView(ng)
+                answerHolder.addView(row)
+            })
+            col.addView(listButton("次のカード（答えを見ずに）") { showFlashcards() })
+        })
+    }
+
+    // ============================================================
+    // 用語辞典
+    // ============================================================
+    private fun showGlossary(filter: String = "") {
+        setContent(screen("用語辞典", back = { showStudyHome() }) { col ->
+            val input = EditText(this)
+            input.hint = "用語を検索(例: DKIM、ゼロトラスト)"
+            input.setText(filter)
+            input.setTextColor(cText)
+            input.setHintTextColor(cSub)
+            input.background = rounded(cCard2, 10)
+            input.setPadding(dp(14), dp(12), dp(14), dp(12))
+            col.addView(input)
+            col.addView(spacer(6))
+            val search = smallBtn("検索", cAccent) { showGlossary(input.text.toString()) }
+            col.addView(search)
+            col.addView(spacer(12))
+
+            val f = filter.trim()
+            val items = if (f.isEmpty()) Glossary.terms
+            else Glossary.terms.filter { it.term.contains(f, true) || it.reading.contains(f) || it.desc.contains(f) }
+            col.addView(tv("${items.size}語", 12f, cSub))
+            col.addView(spacer(8))
+            for (t in items) {
+                val c = card()
+                c.addView(tv(t.term, 15.5f, cAccent, true))
+                c.addView(tv(t.reading, 11.5f, cSub))
+                c.addView(spacer(6))
+                c.addView(tv(t.desc, 13.5f, cText))
+                col.addView(c)
+            }
+        })
+    }
+
+    // ============================================================
+    // タブ2: AI
+    // ============================================================
+    private fun showAiHome() {
+        setContent(screen("AI先生") { col ->
+            // 解説をさがす
+            val c = card()
+            c.addView(tv("わからない用語・問題を調べる", 15f, cText, true))
+            c.addView(spacer(8))
+            val input = EditText(this)
+            input.hint = "キーワードを入力(例: DNSSEC 仕組み)"
+            input.setTextColor(cText)
+            input.setHintTextColor(cSub)
+            input.background = rounded(cCard2, 10)
+            input.setPadding(dp(14), dp(12), dp(14), dp(12))
+            c.addView(input)
+            c.addView(spacer(8))
+            c.addView(smallBtn("解説動画をさがす (YouTube)", cAccent) {
+                val kw = input.text.toString().trim()
+                if (kw.isNotEmpty())
+                    openUrl("https://www.youtube.com/results?search_query=" + Uri.encode("情報処理安全確保支援士 $kw 解説"))
+            })
+            col.addView(c)
+
+            // 午後 自己添削
+            val c2 = card()
+            c2.addView(tv("午後(記述)の自己添削", 15f, cText, true))
+            c2.addView(spacer(6))
+            c2.addView(tv("問題PDFで解答を書き、模範解答PDFと照合します。要点が言えているかを自分で採点しましょう。", 13f, cSub))
+            c2.addView(spacer(10))
+            c2.addView(smallBtn("午後の問題を開く", cCard2) { showPmList() })
+            col.addView(c2)
+
+            // 端末内AI連携(準備中)
+            val c3 = card()
+            c3.addView(tv("端末内AIチャット", 15f, cText, true))
+            c3.addView(pill("準備中", cGold))
+            c3.addView(spacer(8))
+            c3.addView(tv("オフラインで動く端末内AI(Bonsai)との連携を予定しています。現時点では上の解説検索をご利用ください。", 13f, cSub))
+            col.addView(c3)
+
+            // OCR / 音声(準備中)
+            val c4 = card()
+            c4.addView(tv("OCR学習 / 音声学習", 15f, cText, true))
+            c4.addView(pill("準備中", cGold))
+            c4.addView(spacer(8))
+            c4.addView(tv("紙の問題の読み取りや、耳で聞く学習は今後のバージョンで対応します。", 13f, cSub))
+            col.addView(c4)
+        })
+    }
+
+    // ============================================================
+    // タブ3: 分析
+    // ============================================================
+    private fun bar(percent: Int, fill: Int): View {
+        val wrap = LinearLayout(this)
+        wrap.orientation = LinearLayout.HORIZONTAL
+        wrap.background = rounded(cCard2, 8)
+        val h = dp(12)
+        wrap.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h)
+        val done = View(this)
+        done.background = rounded(fill, 8)
+        done.layoutParams = LinearLayout.LayoutParams(0, h, percent.coerceIn(0, 100).toFloat())
+        val rest = View(this)
+        rest.layoutParams = LinearLayout.LayoutParams(0, h, (100 - percent.coerceIn(0, 100)).toFloat())
+        wrap.addView(done); wrap.addView(rest)
+        return wrap
+    }
+
+    private fun rateRow(label: String, att: Int, rate: Int, fill: Int): View {
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(12)
+        col.layoutParams = lp
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.HORIZONTAL
+        val l = tv(label, 13.5f, cText, true)
+        l.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        head.addView(l)
+        head.addView(tv(if (att == 0) "未挑戦" else "$rate% ($att)", 13f, if (att == 0) cSub else cText))
+        col.addView(head)
+        col.addView(spacer(6))
+        col.addView(bar(rate, fill))
+        return col
+    }
+
+    private fun showAnalysis() {
+        setContent(screen("学習分析") { col ->
+            if (Store.totalAnswered() == 0) {
+                val c = card()
+                c.addView(tv("まだデータがありません", 15f, cText, true))
+                c.addView(spacer(6))
+                c.addView(tv("問題を解くと、正答率や苦手分野、合格可能性の目安をここに表示します。", 13f, cSub))
+                col.addView(c)
+                return@screen
+            }
+
+            // 合格可能性
+            val est = Store.passEstimate()
+            val pc = card()
+            pc.addView(tv("合格可能性の目安", 14f, cGold, true))
+            pc.addView(spacer(6))
+            if (est < 0) {
+                pc.addView(tv("推定にはもう少しデータが必要です(10問以上)。", 13f, cSub))
+            } else {
+                val color = if (est >= 80) cGreen else if (est >= 50) cGold else cRed
+                pc.addView(tv("$est%", 30f, color, true))
+                pc.addView(spacer(4))
+                pc.addView(bar(est, color))
+                pc.addView(spacer(6))
+                pc.addView(tv("午前Ⅱを主要因に、合格ライン60%への到達度を簡易推定した目安です。", 12f, cSub))
+            }
+            col.addView(pc)
+
+            // セクション別
+            val sc = card()
+            sc.addView(tv("セクション別 正答率", 14f, cText, true))
+            sc.addView(spacer(10))
+            sc.addView(rateRow("午前Ⅱ (セキュリティ)", Store.sectionAtt("am2"), Store.sectionRate("am2"), cAccent))
+            sc.addView(rateRow("午前Ⅰ (共通)", Store.sectionAtt("am1"), Store.sectionRate("am1"), 0xFF15A6A0.toInt()))
+            col.addView(sc)
+
+            // 年度別
+            val yc = card()
+            yc.addView(tv("年度別 正答率", 14f, cText, true))
+            yc.addView(spacer(10))
+            yc.addView(tv("午前Ⅱ", 12.5f, cGold, true)); yc.addView(spacer(6))
+            for ((year, _) in QuestionData.am2ByYear)
+                yc.addView(rateRow(year, Store.yearAtt("am2", year), Store.yearRate("am2", year), cAccent))
+            yc.addView(spacer(4))
+            yc.addView(tv("午前Ⅰ", 12.5f, cGold, true)); yc.addView(spacer(6))
+            for ((year, _) in QuestionData.am1ByYear)
+                yc.addView(rateRow(year, Store.yearAtt("am1", year), Store.yearRate("am1", year), 0xFF15A6A0.toInt()))
+            col.addView(yc)
+
+            // よく間違える問題
+            val weak = Store.weakQuestionIds(8).mapNotNull { resolveId(it) }
+            if (weak.isNotEmpty()) {
+                val wc = card()
+                wc.addView(tv("よく間違える問題", 14f, cText, true))
+                wc.addView(spacer(4))
+                wc.addView(tv("タップで再挑戦", 12f, cSub))
+                wc.addView(spacer(8))
+                for ((section, q) in weak) {
+                    wc.addView(listButton("${sectionLabel(section)} ${q.year} 問${q.no}",
+                        q.text.take(28) + if (q.text.length > 28) "…" else "") {
+                        showQuestion(section, q, "再挑戦", { showAnalysis() }) { showAnalysis() }
+                    })
+                }
+                col.addView(wc)
+            }
+        })
+    }
+
+    // ============================================================
+    // タブ4: マイページ
+    // ============================================================
+    private fun showMyPage() {
+        setContent(screen("マイページ") { col ->
+            val c = card()
+            c.addView(tv("学習の記録", 14f, cGold, true))
+            c.addView(spacer(10))
+            c.addView(kv("連続学習日数", "${Store.streak()}日"))
+            c.addView(kv("最長連続", "${Store.bestStreak()}日"))
+            c.addView(kv("学習した日数", "${Store.studyDays()}日"))
+            c.addView(kv("総回答数", "${Store.totalAnswered()}問"))
+            c.addView(kv("正解数", "${Store.totalCorrect()}問"))
+            c.addView(kv("総合正答率", "${Store.overallRate()}%"))
+            col.addView(c)
+
+            val c2 = card()
+            c2.addView(tv("収録状況", 14f, cGold, true))
+            c2.addView(spacer(10))
+            c2.addView(kv("午前Ⅱ", "${QuestionData.am2ByYear.size}年度 / ${countQ("am2")}問"))
+            c2.addView(kv("午前Ⅰ", "${QuestionData.am1ByYear.size}年度 / ${countQ("am1")}問"))
+            c2.addView(kv("午後PDF", "${QuestionData.pmExams.size}回分"))
+            c2.addView(kv("用語辞典", "${Glossary.terms.size}語"))
+            col.addView(c2)
+
+            col.addView(listButton("このアプリについて") { showAbout() })
+            col.addView(listButton("学習データをリセット", "回答履歴・連続日数などを全消去") { confirmReset() })
+        })
+    }
+
+    private fun kv(k: String, v: String): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(8)
+        row.layoutParams = lp
+        val l = tv(k, 14f, cSub)
+        l.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        row.addView(l)
+        row.addView(tv(v, 14f, cText, true))
+        return row
+    }
+
+    private fun showAbout() {
+        setContent(screen("このアプリについて", back = { showMyPage() }) { col ->
+            val c = card()
+            c.addView(tv("情報処理安全確保支援士(SC)の合格を目指す学習アプリです。", 14f, cText))
+            c.addView(spacer(10))
+            c.addView(tv("・過去問はIPA公開の問題・解答例に基づき、正解は公式解答例と全問照合済み。", 13f, cSub))
+            c.addView(spacer(6))
+            c.addView(tv("・午前Ⅱ/午前Ⅰは4択自動採点、午後は公式PDFを参照。", 13f, cSub))
+            c.addView(spacer(6))
+            c.addView(tv("・学習記録は端末内(オフライン)にのみ保存されます。", 13f, cSub))
+            col.addView(c)
+        })
+    }
+
+    private fun confirmReset() {
+        AlertDialog.Builder(this)
+            .setTitle("学習データをリセット")
+            .setMessage("回答履歴・正答率・連続日数・復習キューをすべて削除します。よろしいですか？")
+            .setPositiveButton("削除する") { _, _ -> Store.resetAll(); showMyPage() }
+            .setNegativeButton("キャンセル", null)
+            .show()
+    }
+
+    // ============================================================
+    // 外部リンク
+    // ============================================================
     private fun openUrl(url: String) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        startActivity(intent)
-    }
-
-    // ============================================================
-    // 「教えてもらう」-> YouTube検索
-    // ============================================================
-
-    private fun openYoutubeSearch(theme: String, range: String, comment: String) {
-        val query = listOf(theme, range, comment, "解説")
-            .filter { it.isNotBlank() }
-            .joinToString(" ")
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        val uri = Uri.parse("https://www.youtube.com/results?search_query=$encoded")
-        val intent = Intent(Intent.ACTION_VIEW, uri)
-        startActivity(intent)
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            AlertDialog.Builder(this)
+                .setMessage("リンクを開けませんでした。\n$url")
+                .setPositiveButton("OK", null).show()
+        }
     }
 }
