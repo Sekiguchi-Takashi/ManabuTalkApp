@@ -16,6 +16,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -808,7 +809,7 @@ class MainActivity : Activity() {
     // ============================================================
     // 用語辞典
     // ============================================================
-    private fun showGlossary(filter: String = "") {
+    private fun showGlossary(filter: String = "", cat: String = "すべて") {
         setContent(screen("用語辞典", back = { showStudyHome() }) { col ->
             val input = EditText(this)
             input.hint = "用語を検索(例: DKIM、ゼロトラスト)"
@@ -819,23 +820,107 @@ class MainActivity : Activity() {
             input.setPadding(dp(14), dp(12), dp(14), dp(12))
             col.addView(input)
             col.addView(spacer(6))
-            val search = smallBtn("検索", cAccent) { showGlossary(input.text.toString()) }
+            val search = smallBtn("検索", cAccent) { showGlossary(input.text.toString(), cat) }
             col.addView(search)
+            col.addView(spacer(10))
+
+            // 分野フィルタ(横スクロールのチップ)
+            val hs = HorizontalScrollView(this)
+            hs.isHorizontalScrollBarEnabled = false
+            val chips = LinearLayout(this)
+            chips.orientation = LinearLayout.HORIZONTAL
+            val allCats = listOf("すべて") + Glossary.categories
+            for (cc in allCats) {
+                val sel = cc == cat
+                val chip = tv(cc, 12.5f, if (sel) Color.WHITE else cSub, true)
+                chip.background = rounded(if (sel) cAccent else cCard2, 20)
+                chip.setPadding(dp(14), dp(7), dp(14), dp(7))
+                val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                lp.marginEnd = dp(8)
+                chip.layoutParams = lp
+                chip.setOnClickListener { showGlossary(filter, cc) }
+                chips.addView(chip)
+            }
+            hs.addView(chips)
+            col.addView(hs)
             col.addView(spacer(12))
 
             val f = filter.trim()
-            val items = if (f.isEmpty()) Glossary.terms
-            else Glossary.terms.filter { it.term.contains(f, true) || it.reading.contains(f) || it.desc.contains(f) }
-            col.addView(tv("${items.size}語", 12f, cSub))
+            val items = Glossary.terms.filter { t ->
+                (cat == "すべて" || t.cat == cat) &&
+                (f.isEmpty() || t.term.contains(f, true) || t.full.contains(f, true) ||
+                 t.desc.contains(f) || t.etym.contains(f, true))
+            }
+
+            val head = LinearLayout(this)
+            head.orientation = LinearLayout.HORIZONTAL
+            head.gravity = Gravity.CENTER_VERTICAL
+            val cnt = tv("${items.size}語", 12f, cSub)
+            cnt.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            head.addView(cnt)
+            if (items.isNotEmpty())
+                head.addView(smallBtn("用語カードで暗記", 0xFF7A5AF8.toInt()) { showGlossaryCard(filter, cat) })
+            col.addView(head)
             col.addView(spacer(8))
+
             for (t in items) {
                 val c = card()
                 c.addView(tv(t.term, 15.5f, cAccent, true))
-                c.addView(tv(t.reading, 11.5f, cSub))
+                if (t.full.isNotEmpty()) c.addView(tv(t.full, 11.5f, cSub))
                 c.addView(spacer(6))
                 c.addView(tv(t.desc, 13.5f, cText))
+                if (t.etym.isNotEmpty()) {
+                    c.addView(spacer(6))
+                    c.addView(tv("語源: ${t.etym}", 11.5f, cGold))
+                }
                 col.addView(c)
             }
+            if (items.isEmpty())
+                col.addView(tv("該当する用語がありません。", 13f, cSub))
+        })
+    }
+
+    /** 用語カード(暗記モード)。表=用語、タップで裏=正式名称+意味+語源。 */
+    private fun showGlossaryCard(filter: String, cat: String) {
+        val f = filter.trim()
+        val pool = Glossary.terms.filter { t ->
+            (cat == "すべて" || t.cat == cat) &&
+            (f.isEmpty() || t.term.contains(f, true) || t.full.contains(f, true) ||
+             t.desc.contains(f) || t.etym.contains(f, true))
+        }
+        if (pool.isEmpty()) { showGlossary(filter, cat); return }
+        val t = pool.random()
+        setContent(screen("用語カード", back = { showGlossary(filter, cat) }) { col ->
+            col.addView(pill(t.cat, cCard2))
+            col.addView(spacer(16))
+            val c = card()
+            c.setPadding(dp(20), dp(28), dp(20), dp(28))
+            c.addView(tv(t.term, 24f, cText, true).apply { gravity = Gravity.CENTER })
+            if (t.full.isNotEmpty()) {
+                val fl = tv(t.full, 12.5f, cSub)
+                fl.gravity = Gravity.CENTER
+                fl.setPadding(0, dp(8), 0, 0)
+                c.addView(fl)
+            }
+            col.addView(c)
+
+            val back = LinearLayout(this)
+            back.orientation = LinearLayout.VERTICAL
+            col.addView(back)
+
+            col.addView(bigButton("意味を見る", null, cAccent) {
+                if (back.childCount > 0) return@bigButton
+                val ac = card()
+                ac.background = rounded(cCard2)
+                ac.addView(tv(t.desc, 14.5f, cText))
+                if (t.etym.isNotEmpty()) {
+                    ac.addView(spacer(8))
+                    ac.addView(tv("語源: ${t.etym}", 12.5f, cGold))
+                }
+                back.addView(ac)
+                back.addView(bigButton("次のカード", null, 0xFF7A5AF8.toInt()) { showGlossaryCard(filter, cat) })
+            })
+            col.addView(listButton("次のカード（意味を見ずに）") { showGlossaryCard(filter, cat) })
         })
     }
 

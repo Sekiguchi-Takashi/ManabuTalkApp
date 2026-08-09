@@ -22,7 +22,8 @@
   - 参照: overallRate/sectionRate/yearRate/streak/bestStreak/studyDays/wrongIds/dueIds/
     weakQuestionIds/passEstimate/resetAll。
   - section識別子: "am2"=午前Ⅱ, "am1"=午前Ⅰ。問題ID = "section|year|no"。
-- Glossary.kt … 用語辞典(約50語、SC頻出語を簡潔解説)。
+- Glossary.kt … 用語辞典(約155語)。data class Term(term, reading, full=正式名称, desc=意味, etym=語源, cat=分野)。
+  categories=分野一覧。略語は正式名称・語源つき。用語集2(略語)・用語集3(分野別)＋SC頻出を統合。
 - Category.kt … 問題文キーワードによる分野自動分類(10分野)。categoryOf/pool/counts/all。
   既存Question構造を変えずに分野別分析・集中演習を実現。分類は優先順キーワードマッチ。
 - MainActivity.kt … 5タブUI本体(プログラマティックKotlin)。
@@ -55,3 +56,6 @@
   フラグ★・結果に分野別スコアと解答時間・見直し一覧を表示。(3)午後 自己採点シート=公式PDFを
   参照しつつ設問ごとに○△×で自己採点し達成度を集計(模範解答要点は捏造せず公式解答例PDFを参照)。
   StoreにqAtt/qCorを追加(分野集計用)。端末内AI(Bonsai)連携は保留。
+- v2.2: 用語辞典を大幅拡充(約50→155語)。アップロードの用語集2(略語+正式名称+語源)・用語集3(分野別
+  用語)を取り込み、SC頻出語と統合。Termに full/etym/cat を追加。用語辞典に分野フィルタ(チップ)、
+  正式名称・語源の表示、暗記用「用語カード」(表=用語→裏=意味+語源)を追加。分類・模試等は据え置き。
