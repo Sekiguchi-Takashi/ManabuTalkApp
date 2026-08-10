@@ -159,8 +159,14 @@ object Store {
     }
 
     fun resetAll() {
-        sp.edit().clear().apply()
+        // 設定は残し、学習記録のみ消す
+        val hint = sp.getBoolean("hint_always", false)
+        sp.edit().clear().putBoolean("hint_always", hint).apply()
     }
+
+    // ヒントを常に表示する設定
+    fun hintAlways() = sp.getBoolean("hint_always", false)
+    fun setHintAlways(b: Boolean) { sp.edit().putBoolean("hint_always", b).apply() }
 
     // 合格可能性の目安(午前Ⅱの直近的な正答率を基準に、60%合格ラインで簡易推定)
     fun passEstimate(): Int {

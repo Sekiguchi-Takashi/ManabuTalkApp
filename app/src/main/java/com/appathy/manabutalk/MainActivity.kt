@@ -503,6 +503,7 @@ class MainActivity : Activity() {
         timerLimitMs: Long? = null,
         flagged: Boolean = false,
         onFlagToggle: (() -> Unit)? = null,
+        allowHint: Boolean = true,
         onDone: (Boolean) -> Unit
     ) {
         val choices = q.choices
@@ -551,6 +552,34 @@ class MainActivity : Activity() {
             col.addView(qc)
 
             if (choices == null) { onDone(true); return@screen }
+
+            // ヒント(答えは伏せる)。設定で常時表示、それ以外はボタンで表示。
+            if (allowHint) {
+                val hintHolder = LinearLayout(this)
+                hintHolder.orientation = LinearLayout.VERTICAL
+                fun revealHint() {
+                    if (hintHolder.childCount > 0) return
+                    val hc = card()
+                    hc.background = rounded(0xFF2A2510.toInt())
+                    hc.addView(tv("ヒント", 13f, cGold, true))
+                    hc.addView(spacer(4))
+                    hc.addView(tv(Hint.of(q), 13.5f, 0xFFEADFB8.toInt()))
+                    hintHolder.addView(hc)
+                }
+                if (Store.hintAlways()) {
+                    revealHint()
+                } else {
+                    val hb = tv("ヒントを見る", 13f, cGold, true)
+                    hb.background = rounded(cCard2, 10)
+                    hb.setPadding(dp(14), dp(10), dp(14), dp(10))
+                    val hbLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    hbLp.bottomMargin = dp(10)
+                    hb.layoutParams = hbLp
+                    hb.setOnClickListener { revealHint(); hb.visibility = View.GONE }
+                    col.addView(hb)
+                }
+                col.addView(hintHolder)
+            }
 
             val labels = listOf("ア", "イ", "ウ", "エ")
             val buttons = ArrayList<TextView>()
@@ -695,7 +724,8 @@ class MainActivity : Activity() {
             onBack = { showMockPick() },
             timerStart = start, timerLimitMs = limitMs,
             flagged = flagged.contains(no),
-            onFlagToggle = { if (flagged.contains(no)) flagged.remove(no) else flagged.add(no) }
+            onFlagToggle = { if (flagged.contains(no)) flagged.remove(no) else flagged.add(no) },
+            allowHint = false
         ) { correct ->
             results.add(correct)
             runMock(section, year, list, idx + 1, results, flagged, start, limitMs)
@@ -852,16 +882,19 @@ class MainActivity : Activity() {
                  t.desc.contains(f) || t.etym.contains(f, true))
             }
 
-            val head = LinearLayout(this)
-            head.orientation = LinearLayout.HORIZONTAL
-            head.gravity = Gravity.CENTER_VERTICAL
-            val cnt = tv("${items.size}語", 12f, cSub)
-            cnt.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            head.addView(cnt)
-            if (items.isNotEmpty())
-                head.addView(smallBtn("用語カードで暗記", 0xFF7A5AF8.toInt()) { showGlossaryCard(filter, cat) })
-            col.addView(head)
+            col.addView(tv("${items.size}語", 12f, cSub))
             col.addView(spacer(8))
+            if (items.isNotEmpty()) {
+                val cardRow = LinearLayout(this)
+                cardRow.orientation = LinearLayout.HORIZONTAL
+                val b1 = smallBtn("暗記: 単語→意味", 0xFF7A5AF8.toInt()) { showGlossaryCard(filter, cat, "t2m") }
+                b1.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                val b2 = smallBtn("暗記: 意味→単語", 0xFF15A6A0.toInt()) { showGlossaryCard(filter, cat, "m2t") }
+                b2.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                cardRow.addView(b1); cardRow.addView(spacer2(10)); cardRow.addView(b2)
+                col.addView(cardRow)
+                col.addView(spacer(10))
+            }
 
             for (t in items) {
                 val c = card()
@@ -880,8 +913,10 @@ class MainActivity : Activity() {
         })
     }
 
-    /** 用語カード(暗記モード)。表=用語、タップで裏=正式名称+意味+語源。 */
-    private fun showGlossaryCard(filter: String, cat: String) {
+    /**
+     * 用語カード。mode="t2m": 表=単語→裏=意味。mode="m2t": 表=意味→裏=単語。
+     */
+    private fun showGlossaryCard(filter: String, cat: String, mode: String) {
         val f = filter.trim()
         val pool = Glossary.terms.filter { t ->
             (cat == "すべて" || t.cat == cat) &&
@@ -890,37 +925,57 @@ class MainActivity : Activity() {
         }
         if (pool.isEmpty()) { showGlossary(filter, cat); return }
         val t = pool.random()
-        setContent(screen("用語カード", back = { showGlossary(filter, cat) }) { col ->
+        val m2t = mode == "m2t"
+        val title = if (m2t) "用語カード（意味→単語）" else "用語カード（単語→意味）"
+        setContent(screen(title, back = { showGlossary(filter, cat) }) { col ->
             col.addView(pill(t.cat, cCard2))
             col.addView(spacer(16))
+
+            // 表(front)
             val c = card()
-            c.setPadding(dp(20), dp(28), dp(20), dp(28))
-            c.addView(tv(t.term, 24f, cText, true).apply { gravity = Gravity.CENTER })
-            if (t.full.isNotEmpty()) {
-                val fl = tv(t.full, 12.5f, cSub)
-                fl.gravity = Gravity.CENTER
-                fl.setPadding(0, dp(8), 0, 0)
-                c.addView(fl)
+            c.setPadding(dp(20), dp(24), dp(20), dp(24))
+            if (m2t) {
+                c.addView(tv("この意味の用語は？", 12f, cSub).apply { gravity = Gravity.CENTER })
+                c.addView(spacer(10))
+                c.addView(tv(t.desc, 16.5f, cText, true).apply { gravity = Gravity.CENTER })
+            } else {
+                c.addView(tv(t.term, 24f, cText, true).apply { gravity = Gravity.CENTER })
+                if (t.full.isNotEmpty()) {
+                    val fl = tv(t.full, 12.5f, cSub)
+                    fl.gravity = Gravity.CENTER
+                    fl.setPadding(0, dp(8), 0, 0)
+                    c.addView(fl)
+                }
             }
             col.addView(c)
 
+            // 裏(back) 表示領域
             val back = LinearLayout(this)
             back.orientation = LinearLayout.VERTICAL
             col.addView(back)
 
-            col.addView(bigButton("意味を見る", null, cAccent) {
+            val revealLabel = if (m2t) "単語を見る" else "意味を見る"
+            col.addView(bigButton(revealLabel, null, cAccent) {
                 if (back.childCount > 0) return@bigButton
                 val ac = card()
                 ac.background = rounded(cCard2)
-                ac.addView(tv(t.desc, 14.5f, cText))
+                if (m2t) {
+                    ac.addView(tv(t.term, 22f, cAccent, true))
+                    if (t.full.isNotEmpty()) {
+                        ac.addView(spacer(4))
+                        ac.addView(tv(t.full, 12.5f, cSub))
+                    }
+                } else {
+                    ac.addView(tv(t.desc, 14.5f, cText))
+                }
                 if (t.etym.isNotEmpty()) {
                     ac.addView(spacer(8))
                     ac.addView(tv("語源: ${t.etym}", 12.5f, cGold))
                 }
                 back.addView(ac)
-                back.addView(bigButton("次のカード", null, 0xFF7A5AF8.toInt()) { showGlossaryCard(filter, cat) })
+                back.addView(bigButton("次のカード", null, 0xFF7A5AF8.toInt()) { showGlossaryCard(filter, cat, mode) })
             })
-            col.addView(listButton("次のカード（意味を見ずに）") { showGlossaryCard(filter, cat) })
+            col.addView(listButton("次のカード（答えを見ずに）") { showGlossaryCard(filter, cat, mode) })
         })
     }
 
@@ -1234,6 +1289,31 @@ class MainActivity : Activity() {
             c2.addView(kv("午後PDF", "${QuestionData.pmExams.size}回分"))
             c2.addView(kv("用語辞典", "${Glossary.terms.size}語"))
             col.addView(c2)
+
+            val c3 = card()
+            c3.addView(tv("設定", 14f, cGold, true))
+            c3.addView(spacer(10))
+            val hintRow = LinearLayout(this)
+            hintRow.orientation = LinearLayout.HORIZONTAL
+            hintRow.gravity = Gravity.CENTER_VERTICAL
+            val hintLabel = LinearLayout(this)
+            hintLabel.orientation = LinearLayout.VERTICAL
+            hintLabel.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            hintLabel.addView(tv("ヒントを常に表示", 14.5f, cText, true))
+            hintLabel.addView(tv("午前の問題でヒントを最初から表示(模試を除く)", 12f, cSub))
+            hintRow.addView(hintLabel)
+            val toggle = tv(if (Store.hintAlways()) "ON" else "OFF", 13f, Color.WHITE, true)
+            toggle.background = rounded(if (Store.hintAlways()) cGreen else cCard2, 20)
+            toggle.setPadding(dp(16), dp(6), dp(16), dp(6))
+            toggle.setOnClickListener {
+                val nv = !Store.hintAlways()
+                Store.setHintAlways(nv)
+                toggle.text = if (nv) "ON" else "OFF"
+                toggle.background = rounded(if (nv) cGreen else cCard2, 20)
+            }
+            hintRow.addView(toggle)
+            c3.addView(hintRow)
+            col.addView(c3)
 
             col.addView(listButton("このアプリについて") { showAbout() })
             col.addView(listButton("学習データをリセット", "回答履歴・連続日数などを全消去") { confirmReset() })
