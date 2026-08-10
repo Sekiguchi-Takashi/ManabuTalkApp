@@ -356,6 +356,7 @@ class MainActivity : Activity() {
             })
             col.addView(spacer(6))
             col.addView(sectionHeader("インプット"))
+            col.addView(listButton("知識マップ", "全体像と学習順序を図で把握") { showKnowledgeMap() })
             col.addView(listButton("単語帳", "問題で覚える一問一答フラッシュカード") { showFlashcards() })
             col.addView(listButton("用語辞典", "${Glossary.terms.size}語を検索") { showGlossary() })
         })
@@ -779,6 +780,145 @@ class MainActivity : Activity() {
 
             col.addView(bigButton("間違えた問題を復習", null, 0xFF7A5AF8.toInt()) { showReview() })
             col.addView(listButton("模試メニューへ") { showMockPick() })
+        })
+    }
+
+    // ============================================================
+    // 知識マップ
+    // ============================================================
+    private fun showKnowledgeMap() {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setBackgroundColor(cBg)
+
+        // ヘッダ
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.VERTICAL
+        head.setPadding(dp(16), dp(14), dp(16), dp(8))
+        val bk = tv("‹ もどる", 14f, cAccent, true)
+        bk.setOnClickListener { showStudyHome() }
+        head.addView(bk)
+        head.addView(spacer(6))
+        head.addView(tv("知識マップ", 20f, cText, true))
+        head.addView(tv("中心=試験全体 / 円=分野(数字は推奨学習順) / 金の矢印=前提→発展。ピンチで拡大、ドラッグで移動、分野をタップで詳細。", 11.5f, cSub))
+        root.addView(head)
+
+        // マップ本体
+        val map = MapView(this) { cat -> showMapCategory(cat) }
+        map.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        root.addView(map)
+
+        // フッタ操作
+        val foot = LinearLayout(this)
+        foot.orientation = LinearLayout.HORIZONTAL
+        foot.setPadding(dp(16), dp(8), dp(16), dp(12))
+        val reset = smallBtn("表示をリセット", cCard2) { map.resetView() }
+        reset.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        val orderBtn = smallBtn("学習順で見る", cAccent) { showLearningOrder() }
+        orderBtn.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        foot.addView(reset); foot.addView(spacer2(10)); foot.addView(orderBtn)
+        root.addView(foot)
+
+        setContent(root)
+    }
+
+    /** 学習順のリスト表示(マップの補助。1画面で順序を把握) */
+    private fun showLearningOrder() {
+        setContent(screen("学習順ガイド", back = { showKnowledgeMap() }) { col ->
+            col.addView(tv("前提→発展の順に並べた推奨ルートです。上から進めると土台が崩れません。", 13f, cSub))
+            col.addView(spacer(12))
+            for (b in KnowledgeMap.inLearningOrder()) {
+                val c = card()
+                val head = LinearLayout(this)
+                head.orientation = LinearLayout.HORIZONTAL
+                head.gravity = Gravity.CENTER_VERTICAL
+                head.addView(pill("${b.order}", cAccent))
+                head.addView(spacer2(10))
+                val t = tv(b.category, 16f, cText, true)
+                t.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                head.addView(t)
+                c.addView(head)
+                c.addView(spacer(8))
+                c.addView(tv(b.summary, 13f, cSub))
+                c.addView(spacer(10))
+                c.addView(listButton("詳しく見る") { showMapCategory(b.category) })
+                col.addView(c)
+            }
+        })
+    }
+
+    /** マップの分野をタップしたときの詳細。中分類・小分類＋演習/用語辞典への動線。 */
+    private fun showMapCategory(cat: String) {
+        val b = KnowledgeMap.byCategory(cat)
+        setContent(screen(cat, back = { showKnowledgeMap() }) { col ->
+            if (b == null) {
+                col.addView(tv("この分野の詳細データがありません。", 13f, cSub))
+                return@screen
+            }
+            // 概要 + 自分の到達度
+            val c = card()
+            val head = LinearLayout(this)
+            head.orientation = LinearLayout.HORIZONTAL
+            head.gravity = Gravity.CENTER_VERTICAL
+            head.addView(pill("学習順 ${b.order}", cAccent))
+            head.addView(spacer2(8))
+            val stats = categoryStats()[cat]
+            if (stats != null && stats[0] > 0) {
+                val r = stats[1] * 100 / stats[0]
+                head.addView(pill("正答率 ${r}%", if (r < 50) cRed else if (r < 70) cGold else cGreen))
+            } else {
+                head.addView(pill("未挑戦", cCard2))
+            }
+            c.addView(head)
+            c.addView(spacer(10))
+            c.addView(tv(b.summary, 13.5f, cText))
+            col.addView(c)
+
+            // 前提・発展
+            val pre = KnowledgeMap.prereq.filter { it.second == cat }.map { it.first }
+            val next = KnowledgeMap.prereq.filter { it.first == cat }.map { it.second }
+            if (pre.isNotEmpty() || next.isNotEmpty()) {
+                val rc = card()
+                rc.addView(tv("知識のつながり", 14f, cGold, true))
+                rc.addView(spacer(8))
+                if (pre.isNotEmpty()) {
+                    rc.addView(tv("前提となる分野", 12f, cSub))
+                    rc.addView(spacer(6))
+                    for (p in pre) rc.addView(listButton("← $p") { showMapCategory(p) })
+                }
+                if (next.isNotEmpty()) {
+                    rc.addView(spacer(6))
+                    rc.addView(tv("ここから発展する分野", 12f, cSub))
+                    rc.addView(spacer(6))
+                    for (nx in next) rc.addView(listButton("→ $nx") { showMapCategory(nx) })
+                }
+                col.addView(rc)
+            }
+
+            // 中分類・小分類
+            for (m in b.mid) {
+                val mc = card()
+                mc.addView(tv(m.name, 15f, cAccent, true))
+                mc.addView(spacer(8))
+                for (s in m.small) {
+                    val row = tv("・$s", 13.5f, cText)
+                    row.setPadding(0, dp(3), 0, dp(3))
+                    mc.addView(row)
+                }
+                col.addView(mc)
+            }
+
+            // 学習アクション
+            val ac = card()
+            ac.addView(tv("この分野を学ぶ", 14f, cGold, true))
+            ac.addView(spacer(10))
+            val n = Category.counts()[cat] ?: 0
+            if (n > 0) ac.addView(listButton("問題を解く", "${n}問から集中演習") { startCategoryDrill(cat) })
+            ac.addView(listButton("用語辞典で見る", "関連する用語をまとめて確認") {
+                showGlossary("", if (Glossary.categories.contains(b.glossaryCat)) b.glossaryCat else "すべて")
+            })
+            col.addView(ac)
         })
     }
 
