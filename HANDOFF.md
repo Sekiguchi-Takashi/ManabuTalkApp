@@ -25,7 +25,7 @@
 - Glossary.kt … 用語辞典(約155語)。data class Term(term, reading, full=正式名称, desc=意味, etym=語源, cat=分野)。
   categories=分野一覧。略語は正式名称・語源つき。用語集2(略語)・用語集3(分野別)＋SC頻出を統合。
 - KnowledgeMap.kt … 知識マップのデータ。Branch(category=Category.allと一致, glossaryCat, order=推奨学習順,
-  summary, mid=中分類→small=小分類)、prereq=前提→発展の関係。byCategory/inLearningOrder。
+  summary, mid=中分類→small=小分類/terms=関連用語)。用語辞典155語すべてを中分類に紐づけ済み、prereq=前提→発展の関係。byCategory/inLearningOrder。
 - MapView.kt … 知識マップ描画View(Canvas)。放射状レイアウト、ピンチズーム/ドラッグ移動、
   大分類タップでコールバック。中心=試験全体、第1階層=分野(学習順バッジ)、第2階層=中分類、金の矢印=前提→発展。
 - Hint.kt … 解説文から「答えに近づくヒント」を自動生成。正解の記号(ア〜エ)と正解選択肢の語・先頭名詞句を
@@ -48,6 +48,16 @@
 ## 未実装(設計書にあり今後対応)
 - 端末内AIチャット(Bonsai連携。ユーザー側Bonsaiで別途進行)、OCR学習、音声学習、知識グラフ、
   通知、ウィジェット。→ UI上は「準備中」と明示。
+
+## デプロイ(恒久ルール)
+- 納品ZIPには deploy.sh を同梱。実行は `bash ~/ManabuTalkApp/deploy.sh "vX.X 要約"` の1コマンドで
+  add/commit → `git pull --rebase origin main` → push → 最新リリースの次タグを算出して GitHub API で
+  タグ発行、まで完結する。
+- `git pull --rebase origin main` は必須。カタログ管理システムが API 経由で
+  .github/workflows/release.yml と ci/appathy.keystore を直接コミットするため、無いと push が rejected。
+- **.github/workflows/release.yml と ci/ ディレクトリは配布ビルドに必要。削除・追跡解除しない**
+  (ZIPにも含めず、リポジトリ側の実体をそのまま残す)。
+- タグを打つと Actions がビルドして Release を作り、自作アプリストアに更新として現れる。
 
 ## 注意
 - 学習データは端末内のみ(オフライン)。リセットはマイページから。
@@ -74,3 +84,8 @@
   放射状に展開し、中分類まで描画。金の矢印で前提→発展、円の数字で推奨学習順を表示。ピンチズーム/ドラッグ対応。
   分野タップ→詳細(概要・自分の正答率・前提/発展分野・中分類/小分類一覧)から、その分野の集中演習や
   用語辞典(対応分野で絞込み)へ直結。補助として「学習順ガイド」も追加。演習・分析・辞典とマップが連動。
+- v2.6: 知識マップを整頓＋用語紐づけ。描画を刷新(大分類の角度を等分、中分類は扇内に均等配置して重なりを解消、
+  ラベルは文字幅に合わせた枠、学習順バッジを円外に、前提→発展の弧を内側に退避)。ズーム＋/－/リセット追加。
+  KnowledgeMap.Midにtermsを追加し、Glossaryの155語すべてを41の中分類へ分配(過不足なし)。分野詳細では
+  中分類ごとに用語チップを表示し、タップで意味・正式名称・語源をダイアログ表示→辞典へも遷移可能。
+- v2.6(納品時): deploy.sh を恒久仕様で同梱(pull --rebase とタグ発行を含む)。REPO=ManabuTalkApp。

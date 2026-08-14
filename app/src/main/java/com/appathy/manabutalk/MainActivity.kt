@@ -813,11 +813,18 @@ class MainActivity : Activity() {
         val foot = LinearLayout(this)
         foot.orientation = LinearLayout.HORIZONTAL
         foot.setPadding(dp(16), dp(8), dp(16), dp(12))
-        val reset = smallBtn("表示をリセット", cCard2) { map.resetView() }
-        reset.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        val zoomOut = smallBtn("－", cCard2) { map.zoom(0.8f) }
+        zoomOut.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.7f)
+        val zoomIn = smallBtn("＋", cCard2) { map.zoom(1.25f) }
+        zoomIn.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.7f)
+        val reset = smallBtn("リセット", cCard2) { map.resetView() }
+        reset.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.1f)
         val orderBtn = smallBtn("学習順で見る", cAccent) { showLearningOrder() }
-        orderBtn.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        foot.addView(reset); foot.addView(spacer2(10)); foot.addView(orderBtn)
+        orderBtn.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.5f)
+        foot.addView(zoomOut); foot.addView(spacer2(8))
+        foot.addView(zoomIn); foot.addView(spacer2(8))
+        foot.addView(reset); foot.addView(spacer2(8))
+        foot.addView(orderBtn)
         root.addView(foot)
 
         setContent(root)
@@ -896,15 +903,28 @@ class MainActivity : Activity() {
                 col.addView(rc)
             }
 
-            // 中分類・小分類
+            // 中分類・小分類・関連用語
             for (m in b.mid) {
                 val mc = card()
-                mc.addView(tv(m.name, 15f, cAccent, true))
+                val mh = LinearLayout(this)
+                mh.orientation = LinearLayout.HORIZONTAL
+                mh.gravity = Gravity.CENTER_VERTICAL
+                val mt = tv(m.name, 15f, cAccent, true)
+                mt.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                mh.addView(mt)
+                if (m.terms.isNotEmpty()) mh.addView(pill("${m.terms.size}語", cCard2))
+                mc.addView(mh)
                 mc.addView(spacer(8))
                 for (s in m.small) {
                     val row = tv("・$s", 13.5f, cText)
                     row.setPadding(0, dp(3), 0, dp(3))
                     mc.addView(row)
+                }
+                if (m.terms.isNotEmpty()) {
+                    mc.addView(spacer(10))
+                    mc.addView(tv("関連用語（タップで意味を表示）", 11.5f, cSub))
+                    mc.addView(spacer(6))
+                    mc.addView(termChips(m.terms))
                 }
                 col.addView(mc)
             }
@@ -920,6 +940,63 @@ class MainActivity : Activity() {
             })
             col.addView(ac)
         })
+    }
+
+    /** 用語チップを折り返して並べる。タップでその用語の意味を表示。 */
+    private fun termChips(terms: List<String>): View {
+        val wrap = LinearLayout(this)
+        wrap.orientation = LinearLayout.VERTICAL
+        var row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        var used = 0
+        val perRow = 3
+        for (t in terms) {
+            if (used >= perRow) {
+                wrap.addView(row)
+                wrap.addView(spacer(6))
+                row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                used = 0
+            }
+            val chip = tv(t, 12f, cText, true)
+            chip.background = rounded(cCard2, 16)
+            chip.setPadding(dp(10), dp(6), dp(10), dp(6))
+            chip.gravity = Gravity.CENTER
+            val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            lp.marginEnd = dp(6)
+            chip.layoutParams = lp
+            chip.setOnClickListener { showTermDialog(t) }
+            row.addView(chip)
+            used++
+        }
+        if (used > 0) {
+            while (used < perRow) {
+                val filler = View(this)
+                filler.layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+                row.addView(filler)
+                used++
+            }
+            wrap.addView(row)
+        }
+        return wrap
+    }
+
+    private fun showTermDialog(term: String) {
+        val t = Glossary.terms.firstOrNull { it.term == term }
+        if (t == null) {
+            showGlossary(term, "すべて")
+            return
+        }
+        val msg = StringBuilder()
+        if (t.full.isNotEmpty()) msg.append(t.full).append("\n\n")
+        msg.append(t.desc)
+        if (t.etym.isNotEmpty()) msg.append("\n\n語源: ").append(t.etym)
+        AlertDialog.Builder(this)
+            .setTitle(t.term)
+            .setMessage(msg.toString())
+            .setPositiveButton("閉じる", null)
+            .setNeutralButton("辞典で見る") { _, _ -> showGlossary(t.term, "すべて") }
+            .show()
     }
 
     // ============================================================
