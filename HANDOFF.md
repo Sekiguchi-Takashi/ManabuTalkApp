@@ -49,6 +49,11 @@
 - 端末内AIチャット(Bonsai連携。ユーザー側Bonsaiで別途進行)、OCR学習、音声学習、知識グラフ、
   通知、ウィジェット。→ UI上は「準備中」と明示。
 
+## CI(恒久ルール)
+- `.github/workflows/build.yml` に `actions/upload-artifact` を入れない。Artifacts ストレージ無料枠(0.5GB)が
+  枯渇し "Artifact storage quota has been hit" でビルドが失敗するため。APKは Release から配布するので
+  Artifacts は不要。build.yml はコンパイル確認用と割り切る。
+
 ## デプロイ(恒久ルール)
 - 納品ZIPには deploy.sh を同梱。実行は `bash ~/ManabuTalkApp/deploy.sh "vX.X 要約"` の1コマンドで
   add/commit → `git pull --rebase origin main` → push → 最新リリースの次タグを算出して GitHub API で
@@ -89,3 +94,4 @@
   KnowledgeMap.Midにtermsを追加し、Glossaryの155語すべてを41の中分類へ分配(過不足なし)。分野詳細では
   中分類ごとに用語チップを表示し、タップで意味・正式名称・語源をダイアログ表示→辞典へも遷移可能。
 - v2.6(納品時): deploy.sh を恒久仕様で同梱(pull --rebase とタグ発行を含む)。REPO=ManabuTalkApp。
+- v2.6(納品時): build.yml から upload-artifact ステップを削除(Artifacts枠枯渇によるビルド失敗を回避)。
