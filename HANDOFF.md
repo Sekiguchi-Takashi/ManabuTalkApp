@@ -49,20 +49,23 @@
 - 端末内AIチャット(Bonsai連携。ユーザー側Bonsaiで別途進行)、OCR学習、音声学習、知識グラフ、
   通知、ウィジェット。→ UI上は「準備中」と明示。
 
-## CI(恒久ルール)
-- `.github/workflows/build.yml` に `actions/upload-artifact` を入れない。Artifacts ストレージ無料枠(0.5GB)が
-  枯渇し "Artifact storage quota has been hit" でビルドが失敗するため。APKは Release から配布するので
-  Artifacts は不要。build.yml はコンパイル確認用と割り切る。
-
-## デプロイ(恒久ルール)
-- 納品ZIPには deploy.sh を同梱。実行は `bash ~/ManabuTalkApp/deploy.sh "vX.X 要約"` の1コマンドで
-  add/commit → `git pull --rebase origin main` → push → 最新リリースの次タグを算出して GitHub API で
-  タグ発行、まで完結する。
-- `git pull --rebase origin main` は必須。カタログ管理システムが API 経由で
-  .github/workflows/release.yml と ci/appathy.keystore を直接コミットするため、無いと push が rejected。
-- **.github/workflows/release.yml と ci/ ディレクトリは配布ビルドに必要。削除・追跡解除しない**
-  (ZIPにも含めず、リポジトリ側の実体をそのまま残す)。
-- タグを打つと Actions がビルドして Release を作り、自作アプリストアに更新として現れる。
+## 納品規約(恒久)
+1. deploy.sh は「add/commit → pull --rebase → push → タグ発行」まで1コマンドで完結。
+   次タグは `git fetch --tags --force` → `git tag --list 'v*' | sort -V | tail -1` から算出し、
+   `git tag <名>` → `git push origin <名>` でローカル発行する。
+   GitHub API の heads/releases 参照は反映遅延で一つ前のコミットにタグが付くため禁止。
+   第2引数に `notag` を渡すと push のみでタグを発行しない。
+2. build.yml は作らない・同梱しない。CI は release.yml(タグ起動)のみ。
+   `actions/upload-artifact` は使わない(Artifacts枠0.5GBが枯渇し全ビルドが落ちる)。
+3. `ci/` ディレクトリと `.github/workflows/release.yml` は配布ビルドに必要。削除・追跡解除しない
+   (ZIPにも含めず、リポジトリ側の実体をそのまま残す)。
+4. ファイルを削除する納品では deploy.sh に `rm -f 対象パス` を足す
+   (`unzip -o` は端末の旧ファイルを消さないため)。本納品では build.yml を削除するので
+   deploy.sh に `rm -f .github/workflows/build.yml` を含めている。
+5. 納品はバージョン番号付きZIP＋同メッセージに実行4行ブロック。冒頭に【本番】か【テスト】を明示。
+   シェルは echo 禁止・対話入力禁止・トークンをチャットに貼らせない。
+   `git pull --rebase` は必須(カタログ管理システムが API 経由で release.yml と ci/appathy.keystore を
+   直接コミットするため、無いと push が rejected)。
 
 ## 注意
 - 学習データは端末内のみ(オフライン)。リセットはマイページから。
@@ -95,3 +98,6 @@
   中分類ごとに用語チップを表示し、タップで意味・正式名称・語源をダイアログ表示→辞典へも遷移可能。
 - v2.6(納品時): deploy.sh を恒久仕様で同梱(pull --rebase とタグ発行を含む)。REPO=ManabuTalkApp。
 - v2.6(納品時): build.yml から upload-artifact ステップを削除(Artifacts枠枯渇によるビルド失敗を回避)。
+- v2.7: 納品規約に準拠。deploy.sh をローカルタグ方式(git tag --list | sort -V → git tag → git push origin タグ)
+  に変更し、notag オプションと `rm -f .github/workflows/build.yml` を追加。build.yml は同梱を廃止(CIは
+  release.yml のタグ起動のみ)。アプリ機能の変更はなし。
